@@ -39,14 +39,14 @@ struct PushFireLogger: Sendable {
         guard enabled else { return }
         let bodyText = body.flatMap { String(data: $0, encoding: .utf8) } ?? "<empty>"
         logger.debug(
-            "→ \(method, privacy: .public) \(url, privacy: .public) \(bodyText, privacy: .public)")
+            "→ \(method, privacy: .public) \(url, privacy: .public) \(bodyText, privacy: .private)")
     }
 
     func apiResponse(method: String, url: String, statusCode: Int, body: Data) {
         guard enabled else { return }
         let bodyText = String(data: body, encoding: .utf8) ?? "<binary>"
         logger.debug(
-            "← \(method, privacy: .public) \(url, privacy: .public) [\(statusCode)] \(bodyText, privacy: .public)"
+            "← \(method, privacy: .public) \(url, privacy: .public) [\(statusCode)] \(bodyText, privacy: .private)"
         )
     }
 }
