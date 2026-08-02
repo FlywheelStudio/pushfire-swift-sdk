@@ -135,6 +135,131 @@ actor DeviceService {
         logger.info("Device data cleared")
     }
 
+    // MARK: - Permission sync
+
+    /// Re-checks the OS permission and syncs any change to PushFire.
+    ///
+    /// Returns the re-registered device when the server was updated, nil otherwise.
+    /// Never throws: this runs on app foreground where there is no caller to handle a
+    /// failure, and a failed sync must simply be retried on the next resume.
+    func checkAndHandlePermissionStatusChange() async -> Device? {
+        let current = await permissions.authorizationStatus().isEnabled
+
+        guard let last = store.bool(forKey: StorageKey.lastPermissionStatus) else {
+            store.setBool(current, forKey: StorageKey.lastPermissionStatus)
+            return nil
+        }
+
+        guard last != current else { return nil }
+
+        // Deliberately do NOT persist the new status here. registerDevice() compares the
+        // incoming value against the saved last-known status to decide whether to PATCH;
+        // writing it up front makes registerDevice() see "no change" and silently skip
+        // the update, and also suppresses retries, because a failed sync would still have
+        // advanced the saved status.
+
+        if !current {
+            logger.info("OS notification permission revoked - updating server to disabled")
+            return try? await registerDevice()
+        }
+
+        let preference = store.bool(forKey: StorageKey.notificationPreference) ?? true
+        if preference {
+            logger.info("OS notification permission re-granted - restoring")
+            return try? await registerDevice()
+        }
+
+        // The developer opted out, so leave the server alone — but acknowledge the OS
+        // change so it is not re-detected on every resume.
+        store.setBool(current, forKey: StorageKey.lastPermissionStatus)
+        logger.info("OS permission re-granted but preference is disabled - not restoring")
+        return nil
+    }
+
+    // MARK: - Preference
+
+    /// Sets whether this device should receive PushFire notifications.
+    ///
+    /// This is a PushFire-level preference, distinct from the OS permission.
+    func setNotificationEnabled(_ enabled: Bool) async throws -> SetNotificationResult {
+        logger.info("Setting notification enabled: \(enabled)")
+
+        if enabled {
+            let osPermission = await permissions.authorizationStatus().isEnabled
+            guard osPermission else {
+                logger.warning("Cannot enable notifications - OS permission is denied")
+                return .systemPermissionDenied
+            }
+        }
+
+        if store.bool(forKey: StorageKey.notificationPreference) == enabled {
+            logger.info("Notification preference already \(enabled) - nothing to do")
+            return .success
+        }
+
+        guard let deviceId = store.string(forKey: StorageKey.deviceId) else {
+            throw PushFireError.device(
+                "Cannot set notification preference - no device registered"
+            )
+        }
+        guard let fcmToken = store.string(forKey: StorageKey.fcmToken) else {
+            throw PushFireError.device(
+                "Cannot set notification preference - no push token available"
+            )
+        }
+
+        let info = await deviceInfo.deviceInfo()
+        let device = Device(
+            id: deviceId,
+            fcmToken: fcmToken,
+            os: info.os,
+            osVersion: info.osVersion,
+            language: info.language,
+            manufacturer: info.manufacturer,
+            model: info.model,
+            appVersion: info.appVersion,
+            pushNotificationEnabled: enabled
+        )
+
+        try await update(device)
+
+        // Persist only after the server confirms, so a failed PATCH cannot leave local
+        // and remote disagreeing.
+        store.setBool(enabled, forKey: StorageKey.notificationPreference)
+
+        logger.info("Notification preference updated to \(enabled)")
+        return .success
+    }
+
+    /// The OS permission state and the PushFire preference.
+    /// Does not require a registered device.
+    func notificationStatus() async -> NotificationStatus {
+        NotificationStatus(
+            isPermissionGranted: await permissions.authorizationStatus().isEnabled,
+            isEnabled: store.bool(forKey: StorageKey.notificationPreference) ?? true
+        )
+    }
+
+    /// Prompts for the notification permission, re-registering the device if granted.
+    @discardableResult
+    func requestNotificationPermission() async throws -> Bool {
+        logger.info("Manually requesting notification permission")
+        let status = await permissions.requestAuthorization(provisional: false)
+        let granted = status.isEnabled
+
+        if granted {
+            logger.info("Permission granted - re-registering device")
+            try await registerDevice()
+        }
+
+        return granted
+    }
+
+    /// Opens this app's page in Settings so the user can grant the permission manually.
+    func openNotificationSettings() async -> Bool {
+        await permissions.openSettings()
+    }
+
     // MARK: - Server calls
 
     private func create(_ device: Device) async throws -> Device {
