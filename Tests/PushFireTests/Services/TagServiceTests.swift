@@ -93,6 +93,10 @@ private func makeTagService(
     await #expect(throws: PushFireError.self) {
         _ = try await service.addTag("plan", value: "pro")
     }
+
+    // Proves the guard ran before any request, rather than the transport throwing.
+    let recorded = await transport.recorded
+    #expect(recorded.isEmpty)
 }
 
 @Test func bulkAddReportsPartialFailures() async throws {
@@ -144,7 +148,18 @@ private func makeTagService(
 
     let result = try await service.removeTags(["plan", "tier"])
 
-    #expect(result.succeeded.isEmpty)
+    #expect(result.succeeded.map(\.tagId) == ["plan"])
     #expect(result.failed.count == 1)
     #expect(result.failed[0].tagId == "tier")
+}
+
+@Test func bulkRemoveReportsSuccesses() async throws {
+    let transport = FakeTransport(responses: [.ok("{}"), .ok("{}")])
+    let service = makeTagService(transport: transport)
+
+    let result = try await service.removeTags(["plan", "tier"])
+
+    #expect(result.isCompleteSuccess)
+    #expect(result.succeeded.map(\.tagId) == ["plan", "tier"])
+    #expect(result.failed.isEmpty)
 }

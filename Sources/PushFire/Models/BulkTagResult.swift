@@ -11,6 +11,10 @@ public struct BulkTagResult: Sendable, Equatable {
         public let message: String
     }
 
+    /// The operations that succeeded.
+    ///
+    /// For removals the `value` is empty — a removed tag no longer has one. The `tagId`
+    /// is the meaningful field there.
     public let succeeded: [SubscriberTag]
     public let failed: [Failure]
 

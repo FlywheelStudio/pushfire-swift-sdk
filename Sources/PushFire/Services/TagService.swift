@@ -47,11 +47,15 @@ actor TagService {
     }
 
     func removeTags(_ tagIds: [String]) async throws -> BulkTagResult {
+        var succeeded: [SubscriberTag] = []
         var failed: [BulkTagResult.Failure] = []
 
         for tagId in tagIds {
             do {
-                try await removeTag(tagId)
+                // Go through `write` rather than `removeTag` so the successful removals
+                // can be reported. Returning an empty `succeeded` would make a partial
+                // failure indistinguishable from "nothing was attempted".
+                succeeded.append(try await write(.removeSubscriberTag, tagId: tagId, value: nil))
             } catch {
                 logger.warning("Failed to remove tag \(tagId)", error)
                 failed.append(
@@ -60,13 +64,13 @@ actor TagService {
             }
         }
 
-        if failed.count == tagIds.count && !tagIds.isEmpty {
+        if succeeded.isEmpty && !failed.isEmpty {
             throw PushFireError.tag(
                 "Failed to remove every tag: \(failed.map(\.tagId).joined(separator: ", "))"
             )
         }
 
-        return BulkTagResult(succeeded: [], failed: failed)
+        return BulkTagResult(succeeded: succeeded, failed: failed)
     }
 
     // MARK: - Internals
@@ -120,6 +124,9 @@ actor TagService {
     private static func message(for error: any Error) -> String {
         if case PushFireError.api(let message, _, _, _) = error {
             return message
+        }
+        if let pushFireError = error as? PushFireError {
+            return pushFireError.description
         }
         return String(describing: error)
     }
