@@ -275,6 +275,7 @@ actor DeviceService {
         return device.with(id: id)
     }
 
+    @discardableResult
     private func update(_ device: Device) async throws -> Device {
         try await apiClient.send(.updateDevice, body: device)
         return device
