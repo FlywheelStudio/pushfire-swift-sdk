@@ -27,14 +27,12 @@ private func makeCore(
 
 /// Waits for the next event, failing rather than hanging if none arrives.
 ///
-/// `Duration` and `Task.sleep(for:)` are iOS 16+ APIs; the package's deployment target is
-/// iOS 15 (see `PollInterval`), so this test-only helper and every `@Test` that touches it
-/// need an explicit availability annotation to compile. This does not affect the shipped
-/// library, which never uses `Duration`.
-@available(iOS 16, *)
+/// Nanoseconds rather than `Duration`: `Duration` and `Task.sleep(for:)` are iOS 16+,
+/// and the test target inherits the package's iOS 15 floor. Gating these tests behind
+/// `@available(iOS 16, *)` would silently skip them on the floor we actually ship to.
 private func nextEvent(
     _ stream: AsyncStream<PushFireEvent>,
-    timeout: Duration = .seconds(2)
+    timeoutNanoseconds: UInt64 = 2_000_000_000
 ) async -> PushFireEvent? {
     await withTaskGroup(of: PushFireEvent?.self) { group in
         group.addTask {
@@ -42,7 +40,7 @@ private func nextEvent(
             return await iterator.next()
         }
         group.addTask {
-            try? await Task.sleep(for: timeout)
+            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
             return nil
         }
         let result = await group.next() ?? nil
@@ -51,7 +49,6 @@ private func nextEvent(
     }
 }
 
-@available(iOS 16, *)
 @Test func startRegistersDeviceAndEmitsEvent() async throws {
     let transport = FakeTransport(response: .ok(#"{"id":"dev_1"}"#))
     let core = makeCore(transport: transport)
@@ -68,7 +65,6 @@ private func nextEvent(
     await core.shutdown()
 }
 
-@available(iOS 16, *)
 @Test func startSurvivesFailedRegistration() async throws {
     // A failed auto-registration must not stop the SDK from working.
     let transport = FakeTransport(response: .failure(500, #"{"message":"nope"}"#))
@@ -82,7 +78,6 @@ private func nextEvent(
     await core.shutdown()
 }
 
-@available(iOS 16, *)
 @Test func tokenRefreshReRegistersAndEmits() async throws {
     let transport = FakeTransport(
         responses: [.ok(#"{"id":"dev_1"}"#), .ok("{}"), .ok("{}")]
@@ -109,7 +104,6 @@ private func nextEvent(
     await core.shutdown()
 }
 
-@available(iOS 16, *)
 @Test func foregroundSyncsPermissionChange() async throws {
     let transport = FakeTransport(responses: [.ok(#"{"id":"dev_1"}"#), .ok("{}")])
     let permissions = FakePermissionProvider(status: .authorized)
@@ -132,7 +126,6 @@ private func nextEvent(
     await core.shutdown()
 }
 
-@available(iOS 16, *)
 @Test func authSignInLogsSubscriberIn() async throws {
     let transport = FakeTransport(
         responses: [.ok(#"{"id":"dev_1"}"#), .ok(#"{"id":"sub_1"}"#)]
@@ -147,7 +140,7 @@ private func nextEvent(
     for _ in 0..<20 {
         subscriber = await core.currentSubscriber()
         if subscriber != nil { break }
-        try? await Task.sleep(for: .milliseconds(50))
+        try? await Task.sleep(nanoseconds: 50_000_000)
     }
 
     #expect(subscriber?.externalId == "u_1")
@@ -159,7 +152,6 @@ private func nextEvent(
     await core.shutdown()
 }
 
-@available(iOS 16, *)
 @Test func authSignInSkipsWhenAlreadyLoggedInAsSameUser() async throws {
     let transport = FakeTransport(
         responses: [.ok(#"{"id":"dev_1"}"#), .ok(#"{"id":"sub_1"}"#)]
@@ -170,11 +162,11 @@ private func nextEvent(
     await core.start()
     auth.emit(.signedIn(AuthUser(id: "u_1")))
     for _ in 0..<20 where await core.currentSubscriber() == nil {
-        try? await Task.sleep(for: .milliseconds(50))
+        try? await Task.sleep(nanoseconds: 50_000_000)
     }
 
     auth.emit(.signedIn(AuthUser(id: "u_1")))
-    try? await Task.sleep(for: .milliseconds(200))
+    try? await Task.sleep(nanoseconds: 200_000_000)
 
     let recorded = await transport.recorded
     #expect(recorded.count == 2)
@@ -182,7 +174,6 @@ private func nextEvent(
     await core.shutdown()
 }
 
-@available(iOS 16, *)
 @Test func resetClearsDeviceAndSubscriber() async throws {
     let transport = FakeTransport(
         responses: [.ok(#"{"id":"dev_1"}"#), .ok(#"{"id":"sub_1"}"#), .ok("{}")]
