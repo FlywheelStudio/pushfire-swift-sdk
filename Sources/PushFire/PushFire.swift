@@ -39,8 +39,18 @@ public final class PushFire: Sendable {
         try configuration.validate()
 
         let core = PushFireCore.live(config: configuration, authProvider: authProvider)
-        guard adopt(PushFire(core: core)) else { return }
+
+        // Start before publishing. Publishing first leaves a window where a concurrent
+        // `shutdown()` clears the instance while `start()` is still running, stranding a
+        // core with live background observers that nothing can reach or stop.
         await core.start()
+
+        guard adopt(PushFire(core: core)) else {
+            // Someone else configured while we were starting. Stop the core we started
+            // rather than leaking its observers.
+            await core.shutdown()
+            return
+        }
     }
 
     /// The configured SDK instance.
@@ -83,10 +93,14 @@ public final class PushFire: Sendable {
     }
 
     /// Installs a core built with test doubles.
+    ///
+    /// Deliberately does not shut down an existing instance first, so tests can verify
+    /// that configuring twice is a no-op. Call `shutdown()` explicitly to reset.
     static func configureForTesting(core: PushFireCore) async {
-        await shutdown()
-        _ = adopt(PushFire(core: core))
         await core.start()
+        if !adopt(PushFire(core: core)) {
+            await core.shutdown()
+        }
     }
 
     // MARK: - Subscribers

@@ -48,7 +48,51 @@ struct PushFireFacadeTests {
         #expect(PushFire.isConfigured == false)
     }
 
-    @Test func sdkVersionIsSet() {
+    @Test func sdkVersionIsSet() async {
+        await PushFire.shutdown()
+
         #expect(PushFire.sdkVersion == "0.1.0")
+    }
+
+    @Test func configuringTwiceKeepsTheFirstInstance() async throws {
+        await PushFire.shutdown()
+
+        await PushFire.configureForTesting(
+            core: PushFireCore(
+                config: PushFireConfiguration(apiKey: "k", requestNotificationPermission: false),
+                transport: FakeTransport(response: .ok(#"{"id":"dev_1"}"#)),
+                store: FakeStore(),
+                deviceInfo: FakeDeviceInfoProvider(),
+                permissions: FakePermissionProvider(status: .authorized),
+                tokens: FakeTokenProvider(),
+                lifecycle: FakeLifecycleObserver(),
+                authProvider: nil,
+                apnsPollInterval: .milliseconds(1),
+                apnsPollAttempts: 2
+            )
+        )
+        let first = try await PushFire.shared.deviceId()
+
+        await PushFire.configureForTesting(
+            core: PushFireCore(
+                config: PushFireConfiguration(apiKey: "k", requestNotificationPermission: false),
+                transport: FakeTransport(response: .ok(#"{"id":"dev_2"}"#)),
+                store: FakeStore(),
+                deviceInfo: FakeDeviceInfoProvider(),
+                permissions: FakePermissionProvider(status: .authorized),
+                tokens: FakeTokenProvider(),
+                lifecycle: FakeLifecycleObserver(),
+                authProvider: nil,
+                apnsPollInterval: .milliseconds(1),
+                apnsPollAttempts: 2
+            )
+        )
+        let second = try await PushFire.shared.deviceId()
+
+        #expect(first == "dev_1")
+        // The second configure must not replace the live instance.
+        #expect(second == "dev_1")
+
+        await PushFire.shutdown()
     }
 }
