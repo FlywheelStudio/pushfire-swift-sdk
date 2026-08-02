@@ -1,4 +1,5 @@
 import Testing
+
 @testable import PushFire
 
 @Test func sdkVersionIsSet() {
