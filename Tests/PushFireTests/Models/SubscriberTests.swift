@@ -33,3 +33,22 @@ import Testing
     #expect(json["name"] == nil)
     #expect(json["metadata"] == nil)
 }
+
+@Test func metadataRoundTripsNestedValues() throws {
+    // Metadata is caller-defined, so nested objects, arrays and nulls are the
+    // realistic shapes — not just flat strings.
+    let metadata: [String: JSONValue] = [
+        "flat": .string("a"),
+        "nested": .object(["inner": .array([.int(1), .bool(true), .null])]),
+        "missing": .null,
+    ]
+    let subscriber = Subscriber(externalId: "u_1", metadata: metadata)
+
+    let data = try JSONEncoder().encode(subscriber)
+    let decoded = try JSONDecoder().decode(Subscriber.self, from: data)
+
+    #expect(decoded.metadata == metadata)
+    #expect(
+        decoded.metadata?["nested"] == .object(["inner": .array([.int(1), .bool(true), .null])]))
+    #expect(decoded.metadata?["missing"] == .null)
+}

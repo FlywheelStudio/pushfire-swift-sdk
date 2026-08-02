@@ -24,7 +24,13 @@ public struct WorkflowTarget: Codable, Sendable, Equatable {
 }
 
 /// A request to execute a workflow.
-public struct WorkflowExecutionRequest: Codable, Sendable, Equatable {
+///
+/// `Encodable` only, deliberately. The custom `encode(to:)` below writes `scheduledFor`
+/// as an ISO-8601 string, but a synthesized `init(from:)` would read it with the decoder's
+/// default date strategy (`.deferredToDate`, i.e. a Double) and fail on the very string
+/// this type produces. Nothing ever decodes a request — it only travels to the server — so
+/// the asymmetry is removed by dropping the direction we do not use.
+public struct WorkflowExecutionRequest: Encodable, Sendable, Equatable {
     public let workflowId: String
     public let type: WorkflowExecutionType
     public let scheduledFor: Date?
