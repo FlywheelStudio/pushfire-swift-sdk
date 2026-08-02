@@ -5,16 +5,35 @@ let package = Package(
     name: "PushFire",
     platforms: [.iOS(.v15)],
     products: [
-        .library(name: "PushFire", targets: ["PushFire"])
+        .library(name: "PushFire", targets: ["PushFire"]),
+        .library(name: "PushFireFirebaseAuth", targets: ["PushFireFirebaseAuth"]),
+        .library(name: "PushFireSupabaseAuth", targets: ["PushFireSupabaseAuth"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/firebase/firebase-ios-sdk.git", from: "12.0.0")
+        .package(url: "https://github.com/firebase/firebase-ios-sdk.git", from: "12.0.0"),
+        .package(url: "https://github.com/supabase/supabase-swift.git", "2.0.0"..<"2.50.0"),
     ],
     targets: [
         .target(
             name: "PushFire",
             dependencies: [
                 .product(name: "FirebaseMessaging", package: "firebase-ios-sdk")
+            ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "PushFireFirebaseAuth",
+            dependencies: [
+                "PushFire",
+                .product(name: "FirebaseAuth", package: "firebase-ios-sdk"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "PushFireSupabaseAuth",
+            dependencies: [
+                "PushFire",
+                .product(name: "Supabase", package: "supabase-swift"),
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
