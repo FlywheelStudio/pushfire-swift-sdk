@@ -11,6 +11,9 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/firebase/firebase-ios-sdk.git", from: "12.0.0"),
+        // Capped below 2.50.0 deliberately: supabase-swift 2.50.0 raises its own iOS
+        // floor to 16.0, which is incompatible with this package's iOS 15 floor. Do not
+        // widen this range without also raising `platforms` above.
         .package(url: "https://github.com/supabase/supabase-swift.git", "2.0.0"..<"2.50.0"),
     ],
     targets: [
@@ -40,6 +43,11 @@ let package = Package(
         .testTarget(
             name: "PushFireTests",
             dependencies: ["PushFire"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "PushFireSupabaseAuthTests",
+            dependencies: ["PushFireSupabaseAuth"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
