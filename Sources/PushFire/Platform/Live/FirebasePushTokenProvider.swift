@@ -7,8 +7,16 @@ import Foundation
 struct FirebasePushTokenProvider: PushTokenProvider {
     func apnsToken() async -> String? {
         Messaging.messaging().apnsToken.map { token in
-            token.map { String(format: "%02x", $0) }.joined()
+            Self.hexString(from: token)
         }
+    }
+
+    /// Formats an APNs device token as the lowercase hex string the backend expects.
+    ///
+    /// Extracted so it can be tested directly: a wrong format here would silently break
+    /// device registration, and the surrounding `Messaging` call cannot be unit-tested.
+    static func hexString(from token: Data) -> String {
+        token.map { String(format: "%02x", $0) }.joined()
     }
 
     func fcmToken() async -> String? {

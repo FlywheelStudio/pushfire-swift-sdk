@@ -39,7 +39,7 @@ struct UserNotificationsPermissionProvider: NotificationPermissionProvider {
         }
     }
 
-    private static func map(_ status: UNAuthorizationStatus) -> NotificationAuthorization {
+    static func map(_ status: UNAuthorizationStatus) -> NotificationAuthorization {
         switch status {
         case .notDetermined: return .notDetermined
         case .denied: return .denied
