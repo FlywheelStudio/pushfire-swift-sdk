@@ -17,4 +17,6 @@ jobs:
       - name: Build
         run: xcodebuild build -scheme PushFire -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
       - name: Test
-        run: xcodebuild test -scheme PushFire -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
+        # PushFire-Package is the only scheme that runs every test bundle; the
+        # per-product PushFire scheme is library-only and has no test action.
+        run: xcodebuild test -scheme PushFire-Package -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
