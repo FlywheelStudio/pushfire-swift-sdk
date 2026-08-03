@@ -54,7 +54,7 @@ private func makeClient(_ transport: FakeTransport) -> APIClient {
     do {
         try await makeClient(transport).send(.registerDevice, body: Payload(name: "x"))
         Issue.record("expected a throw")
-    } catch let PushFireError.api(message, code, statusCode, _) {
+    } catch PushFireError.api(let message, let code, let statusCode, _) {
         #expect(message == "Bad thing")
         #expect(code == "E_BAD")
         #expect(statusCode == 400)
@@ -67,7 +67,7 @@ private func makeClient(_ transport: FakeTransport) -> APIClient {
     do {
         try await makeClient(transport).send(.registerDevice, body: Payload(name: "x"))
         Issue.record("expected a throw")
-    } catch let PushFireError.api(message, _, _, _) {
+    } catch PushFireError.api(let message, _, _, _) {
         #expect(message == "boom")
     }
 }
@@ -81,7 +81,7 @@ private func makeClient(_ transport: FakeTransport) -> APIClient {
     do {
         try await makeClient(transport).send(.registerDevice, body: Payload(name: "x"))
         Issue.record("expected a throw")
-    } catch let PushFireError.api(message, _, _, _) {
+    } catch PushFireError.api(let message, _, _, _) {
         #expect(message == "Phone is required; Email is invalid")
     }
 }
@@ -92,7 +92,7 @@ private func makeClient(_ transport: FakeTransport) -> APIClient {
     do {
         try await makeClient(transport).send(.registerDevice, body: Payload(name: "x"))
         Issue.record("expected a throw")
-    } catch let PushFireError.api(message, _, statusCode, _) {
+    } catch PushFireError.api(let message, _, let statusCode, _) {
         #expect(message == "<html>Bad Gateway</html>")
         #expect(statusCode == 502)
     }
@@ -104,7 +104,7 @@ private func makeClient(_ transport: FakeTransport) -> APIClient {
     do {
         try await makeClient(transport).send(.registerDevice, body: Payload(name: "x"))
         Issue.record("expected a throw")
-    } catch let PushFireError.api(message, _, _, _) {
+    } catch PushFireError.api(let message, _, _, _) {
         #expect(message == "API request failed with status 503")
     }
 }
