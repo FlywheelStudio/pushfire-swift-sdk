@@ -20,3 +20,12 @@ jobs:
         # PushFire-Package is the only scheme that runs every test bundle; the
         # per-product PushFire scheme is library-only and has no test action.
         run: xcodebuild test -scheme PushFire-Package -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
+      - name: Generate example project
+        run: |
+          brew install xcodegen
+          cd Example && xcodegen generate
+      - name: Build example
+        run: |
+          xcodebuild build -project Example/PushFireExample.xcodeproj \
+            -scheme PushFireExample \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro'

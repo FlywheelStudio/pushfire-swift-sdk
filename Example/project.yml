@@ -1,0 +1,30 @@
+name: PushFireExample
+options:
+  bundleIdPrefix: app.pushfire.example
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  PushFire:
+    path: ..
+targets:
+  PushFireExample:
+    type: application
+    platform: iOS
+    sources:
+      - PushFireExample
+    info:
+      path: PushFireExample/Info.plist
+      properties:
+        UILaunchScreen: {}
+    dependencies:
+      - package: PushFire
+        product: PushFire
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.pushfire.example
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1"
+    entitlements:
+      path: PushFireExample/PushFireExample.entitlements
+      properties:
+        aps-environment: development
