@@ -150,7 +150,7 @@ let subscriberId = try await PushFire.shared.subscriberId()
 ### Tags
 
 ```swift
-// Single-tag operations. All @discardableResult.
+// Single-tag operations. addTag and updateTag are @discardableResult; removeTag returns Void.
 try await PushFire.shared.addTag("plan", value: "pro")
 try await PushFire.shared.updateTag("plan", value: "enterprise")
 try await PushFire.shared.removeTag("plan")

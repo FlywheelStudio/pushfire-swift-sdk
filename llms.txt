@@ -199,6 +199,7 @@ public struct Device: Codable, Sendable, Equatable {
     public let model: String
     public let appVersion: String
     public let pushNotificationEnabled: Bool
+    public func with(id: String? = nil, fcmToken: String? = nil, pushNotificationEnabled: Bool? = nil) -> Device
 }
 
 public struct NotificationStatus: Sendable, Equatable {
@@ -324,7 +325,8 @@ In the target's Signing & Capabilities:
 1. `PushFire.shared` throws `.notInitialized` before configuration; Flutter's
    `PushFireSDK.instance` does not throw. Every Swift call through `shared` needs `try`.
 2. `addTags`/`updateTags`/`removeTags` return `BulkTagResult` (`succeeded` + `failed`); the
-   Flutter SDK logs failures and returns only the successes.
+   Flutter SDK's `addTags`/`updateTags` log failures and return only the successes, while
+   `removeTags` returns `Future<void>` with no result reporting.
 3. Workflow execution is one `runWorkflow(_:for:at:)` with `WorkflowRunTarget`; Flutter has
    four separate methods (`createImmediateWorkflowForSubscribers/Segments`,
    `createScheduledWorkflowForSubscribers/Segments`).
