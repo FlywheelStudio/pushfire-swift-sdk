@@ -198,14 +198,21 @@ actor SubscriberService {
     /// Named `persist` rather than `store` so it does not collide with the `store`
     /// property.
     func persist(_ subscriber: Subscriber) {
+        // Encode before writing anything. Writing the id first and then failing to
+        // encode would leave subscriberId() reporting a logged-in user that
+        // currentSubscriber() and isLoggedIn() cannot see, and nothing later
+        // reconciles that split.
+        guard let data = try? JSONEncoder().encode(subscriber),
+            let json = String(data: data, encoding: .utf8)
+        else {
+            logger.warning("Could not encode the subscriber; local state left unchanged")
+            return
+        }
+
         if let id = subscriber.id {
             store.setString(id, forKey: StorageKey.subscriberId)
         }
-        if let data = try? JSONEncoder().encode(subscriber),
-            let json = String(data: data, encoding: .utf8)
-        {
-            store.setString(json, forKey: StorageKey.subscriberData)
-        }
+        store.setString(json, forKey: StorageKey.subscriberData)
     }
 
     private func clear() {

@@ -178,6 +178,56 @@ private func makeTagService(
     #expect(recorded.isEmpty)
 }
 
+@Test func bulkRemoveThrowsWhenEveryRemovalFails() async throws {
+    // Nothing was removed, so returning a "result" would let a caller that only reads
+    // `succeeded` treat a total failure as a no-op.
+    let transport = FakeTransport(
+        responses: [
+            .failure(500, #"{"message":"a"}"#),
+            .failure(500, #"{"message":"b"}"#),
+        ]
+    )
+    let service = makeTagService(transport: transport)
+
+    do {
+        _ = try await service.removeTags(["plan", "tier"])
+        Issue.record("expected a throw")
+    } catch PushFireError.tag(let message) {
+        // Every failed id is named, so the caller knows what is still attached.
+        #expect(message == "Failed to remove every tag: plan, tier")
+    }
+}
+
+@Test func bulkFailureMessageUsesTheDescriptionOfANonAPIError() async throws {
+    // Non-API PushFireErrors (a network drop, say) have no `message` payload to lift, so
+    // the failure has to report their description rather than a Swift-internal dump.
+    // One queued response, two tags: the second write gets a transport-level failure.
+    let transport = FakeTransport(responses: [.ok("{}")])
+    let service = makeTagService(transport: transport)
+
+    let result = try await service.removeTags(["plan", "tier"])
+
+    #expect(result.succeeded.map(\.tagId) == ["plan"])
+    #expect(result.failed.count == 1)
+    #expect(
+        result.failed[0].message
+            == "PushFire network error: FakeTransport ran out of queued responses"
+    )
+}
+
+@Test func bulkAddFailureMessageUsesTheDescriptionOfANonAPIError() async throws {
+    let transport = FakeTransport(responses: [.ok("{}")])
+    let service = makeTagService(transport: transport)
+
+    let result = try await service.addTags([("plan", "pro"), ("tier", "gold")])
+
+    #expect(result.failed.count == 1)
+    #expect(
+        result.failed[0].message
+            == "PushFire network error: FakeTransport ran out of queued responses"
+    )
+}
+
 @Test func bulkRemoveWithEmptyArrayMakesNoRequest() async throws {
     let transport = FakeTransport(responses: [])
     let service = makeTagService(transport: transport)

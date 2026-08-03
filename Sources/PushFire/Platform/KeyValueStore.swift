@@ -9,7 +9,8 @@ protocol KeyValueStore: Sendable {
     func remove(forKey key: String)
 }
 
-/// Storage keys, matching the Flutter SDK so behaviour is directly comparable.
+/// Storage keys. The names match the Flutter SDK's, but not the keys it actually
+/// writes — see `UserDefaultsStore.flutterPrefix`.
 enum StorageKey {
     static let deviceId = "pushfire_device_id"
     static let fcmToken = "pushfire_fcm_token"
@@ -17,11 +18,6 @@ enum StorageKey {
     static let notificationPreference = "pushfire_notification_preference"
     static let subscriberId = "pushfire_subscriber_id"
     static let subscriberData = "pushfire_subscriber_data"
-
-    static let all = [
-        deviceId, fcmToken, lastPermissionStatus,
-        notificationPreference, subscriberId, subscriberData,
-    ]
 }
 
 /// The live store, backed by `UserDefaults`.
@@ -40,12 +36,41 @@ struct UserDefaultsStore: KeyValueStore {
         }
     }
 
+    /// The Flutter SDK stores its state through `shared_preferences`, which prefixes
+    /// every key it writes with `flutter.` — the prefix is hardcoded in
+    /// `shared_preferences_legacy.dart`. So an app that shipped the Flutter SDK holds
+    /// its device id under `flutter.pushfire_device_id`, not `pushfire_device_id`.
+    ///
+    /// Without a fallback, swapping the Flutter SDK for this one reads nil, takes the
+    /// new-device branch, and registers a *second* device row for the same physical
+    /// device — leaving the first orphaned server-side while it still holds a live FCM
+    /// token and can still receive pushes.
+    ///
+    /// Reads fall back to the prefixed key and adopt the value under the unprefixed
+    /// one. The prefixed key is left in place: the host app may still be running
+    /// Flutter code that expects to find it.
+    private static let flutterPrefix = "flutter."
+
     func string(forKey key: String) -> String? {
-        defaults.string(forKey: key)
+        if let value = defaults.string(forKey: key) {
+            return value
+        }
+        guard let inherited = defaults.string(forKey: Self.flutterPrefix + key) else {
+            return nil
+        }
+        defaults.set(inherited, forKey: key)
+        return inherited
     }
 
     func bool(forKey key: String) -> Bool? {
-        defaults.object(forKey: key) as? Bool
+        if let value = defaults.object(forKey: key) as? Bool {
+            return value
+        }
+        guard let inherited = defaults.object(forKey: Self.flutterPrefix + key) as? Bool else {
+            return nil
+        }
+        defaults.set(inherited, forKey: key)
+        return inherited
     }
 
     func setString(_ value: String, forKey key: String) {
@@ -58,5 +83,8 @@ struct UserDefaultsStore: KeyValueStore {
 
     func remove(forKey key: String) {
         defaults.removeObject(forKey: key)
+        // Both, or the next read would inherit the Flutter value again and resurrect
+        // state that `clearDeviceData()` and logout are supposed to have erased.
+        defaults.removeObject(forKey: Self.flutterPrefix + key)
     }
 }

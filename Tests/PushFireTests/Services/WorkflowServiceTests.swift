@@ -53,7 +53,7 @@ private func makeWorkflowService(_ transport: FakeTransport) -> WorkflowService 
 
     let data = try await transport.requestData(at: 0)
     #expect(data["type"] as? String == "Scheduled")
-    #expect(data["scheduledFor"] as? String == "2023-11-14T22:13:20Z")
+    #expect(data["scheduledFor"] as? String == "2023-11-14T22:13:20.000Z")
 
     let target = try #require(data["target"] as? [String: Any])
     #expect(target["type"] as? String == "Segments")

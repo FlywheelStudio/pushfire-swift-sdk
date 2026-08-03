@@ -43,6 +43,15 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
+            name: "PushFireFirebaseAuthTests",
+            dependencies: [
+                "PushFireFirebaseAuth",
+                "PushFire",
+                .product(name: "FirebaseAuth", package: "firebase-ios-sdk"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
             name: "PushFireSupabaseAuthTests",
             dependencies: [
                 "PushFireSupabaseAuth",

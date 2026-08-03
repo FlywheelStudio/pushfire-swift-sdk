@@ -175,6 +175,123 @@ private func nextEvent(
     await core.shutdown()
 }
 
+/// Polls until the predicate holds, so a test never depends on one fixed sleep.
+private func waitUntil(
+    attempts: Int = 20,
+    _ condition: () async -> Bool
+) async -> Bool {
+    for _ in 0..<attempts {
+        if await condition() { return true }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+    }
+    return await condition()
+}
+
+@Test func authSignOutLogsTheSubscriberOut() async throws {
+    let transport = FakeTransport(
+        responses: [.ok(#"{"id":"dev_1"}"#), .ok(#"{"id":"sub_1"}"#), .ok("{}")]
+    )
+    let auth = FakeAuthProvider()
+    let core = makeCore(transport: transport, auth: auth)
+
+    await core.start()
+    auth.emit(.signedIn(AuthUser(id: "u_1")))
+    #expect(await waitUntil { await core.isSubscriberLoggedIn() })
+
+    auth.emit(.signedOut)
+
+    #expect(await waitUntil { await core.currentSubscriber() == nil })
+    let recorded = await transport.recorded
+    #expect(recorded.count == 3)
+    #expect(recorded[2].url?.lastPathComponent == "logout-subscriber")
+
+    await core.shutdown()
+}
+
+@Test func authSignOutSurvivesAFailingLogout() async throws {
+    // The server rejecting the logout must still clear the local session — and must not
+    // kill the auth observer, or every later sign-in would be silently ignored.
+    let transport = FakeTransport(
+        responses: [
+            .ok(#"{"id":"dev_1"}"#),
+            .ok(#"{"id":"sub_1"}"#),
+            .failure(500, #"{"message":"logout exploded"}"#),
+            .ok(#"{"id":"sub_2"}"#),
+        ]
+    )
+    let auth = FakeAuthProvider()
+    let core = makeCore(transport: transport, auth: auth)
+
+    await core.start()
+    auth.emit(.signedIn(AuthUser(id: "u_1")))
+    #expect(await waitUntil { await core.isSubscriberLoggedIn() })
+
+    auth.emit(.signedOut)
+    #expect(await waitUntil { await core.currentSubscriber() == nil })
+
+    auth.emit(.signedIn(AuthUser(id: "u_2")))
+    #expect(await waitUntil { await core.currentSubscriber()?.externalId == "u_2" })
+
+    await core.shutdown()
+}
+
+@Test func authSignInSurvivesAFailingLogin() async throws {
+    // Auto-login is best-effort: a failure is logged, leaves no half-built session, and
+    // leaves the observer able to handle the next event.
+    let transport = FakeTransport(
+        responses: [
+            .ok(#"{"id":"dev_1"}"#),
+            .failure(500, #"{"message":"login exploded"}"#),
+            .ok(#"{"id":"sub_1"}"#),
+        ]
+    )
+    let auth = FakeAuthProvider()
+    let core = makeCore(transport: transport, auth: auth)
+
+    await core.start()
+    auth.emit(.signedIn(AuthUser(id: "u_1")))
+
+    // The failed attempt reaches the transport but stores nothing.
+    #expect(await waitUntil { await transport.recorded.count == 2 })
+    #expect(await core.currentSubscriber() == nil)
+    #expect(await core.isSubscriberLoggedIn() == false)
+
+    auth.emit(.signedIn(AuthUser(id: "u_1")))
+    #expect(await waitUntil { await core.currentSubscriber()?.externalId == "u_1" })
+
+    await core.shutdown()
+}
+
+@Test func logoutEmitsLoggedOutEvenWhenTheServerRejectsIt() async throws {
+    // The service clears local state whether or not the call succeeds, so a consumer
+    // that only listens for the event would otherwise keep showing a logged-in user
+    // that no longer exists. The error still propagates.
+    let transport = FakeTransport(
+        responses: [
+            .ok(#"{"id":"dev_1"}"#),
+            .ok(#"{"id":"sub_1"}"#),
+            .failure(500, #"{"message":"logout exploded"}"#),
+        ]
+    )
+    let core = makeCore(transport: transport)
+
+    await core.start()
+    _ = try await core.login(
+        externalId: "u_1", name: nil, email: nil, phone: nil, metadata: nil
+    )
+    // Subscribed after the login so the stream carries only the logout event.
+    let events = await core.eventStream()
+
+    await #expect(throws: PushFireError.self) {
+        try await core.logout()
+    }
+
+    #expect(await nextEvent(events) == .subscriberLoggedOut)
+    #expect(await core.isSubscriberLoggedIn() == false)
+
+    await core.shutdown()
+}
+
 @Test func resetClearsDeviceAndSubscriber() async throws {
     let transport = FakeTransport(
         responses: [.ok(#"{"id":"dev_1"}"#), .ok(#"{"id":"sub_1"}"#), .ok("{}")]
@@ -195,4 +312,72 @@ private func nextEvent(
     #expect(device == nil)
 
     await core.shutdown()
+}
+
+// MARK: - Event contract
+
+/// Collects events off the stream for a bounded window.
+private actor EventCollector {
+    private(set) var events: [PushFireEvent] = []
+    func append(_ event: PushFireEvent) { events.append(event) }
+}
+
+private func deviceRegisteredCount(_ events: [PushFireEvent]) -> Int {
+    events.filter {
+        if case .deviceRegistered = $0 { return true }
+        return false
+    }.count
+}
+
+@Test func tokenRefreshEmitsOneDeviceRegisteredWhenPermissionAlsoChanged() async throws {
+    // A token rotation that coincides with a permission change drives two code paths:
+    // the coalesced permission check and the re-registration. Only one of them may
+    // announce the device, or a consumer treating the event as "state changed,
+    // re-render" double-fires. The Flutter SDK emits exactly one.
+    let store = FakeStore([
+        StorageKey.deviceId: "dev_1",
+        StorageKey.fcmToken: "old-token",
+    ])
+    let permissions = FakePermissionProvider(status: .authorized)
+    let tokens = FakeTokenProvider(fcm: "old-token")
+    let transport = FakeTransport(
+        responses: Array(repeating: .ok(#"{"id":"dev_1"}"#), count: 6)
+    )
+    let core = makeCore(
+        transport: transport, store: store, permissions: permissions, tokens: tokens)
+
+    // start() registers and stores lastPermissionStatus, so the permission has to change
+    // afterwards for the refresh to see a real change. Revoking it before start would
+    // leave nothing for the check to detect.
+    await core.start()
+
+    // Subscribe after start so the auto-registration event is not counted.
+    let events = await core.eventStream()
+    let collector = EventCollector()
+    let pump = Task {
+        for await event in events { await collector.append(event) }
+    }
+
+    permissions.setStatus(.denied)
+    tokens.setFCM("new-token")
+    tokens.emitRefresh("new-token")
+    try await Task.sleep(nanoseconds: 500_000_000)
+    pump.cancel()
+
+    let collected = await collector.events
+    #expect(deviceRegisteredCount(collected) == 1)
+    #expect(collected.contains(.pushTokenRefreshed("new-token")))
+}
+
+@Test func shutdownReleasesTheTransport() async throws {
+    // A URLSession outlives its owner until invalidated, so every configure/shutdown
+    // cycle would otherwise leak one.
+    let transport = FakeTransport(response: .ok(#"{"id":"dev_1"}"#))
+    let core = makeCore(transport: transport)
+
+    await core.start()
+    #expect(transport.didClose == false)
+
+    await core.shutdown()
+    #expect(transport.didClose == true)
 }

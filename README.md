@@ -479,17 +479,25 @@ the places the behavior diverges:
    late in the project because `supabase-swift` 2.50+ requires iOS 16; capping below it would
    have made `PushFireSupabaseAuth` unresolvable for any app already depending on a current
    `supabase-swift`.
-5. **The device-registration comparison does not repeat the Flutter SDK's stale-comparison
-   bug.** The Flutter `DeviceService.registerDevice` compares the saved raw OS permission
-   against the effective (permission AND preference) value, so a device whose developer
-   disabled notifications PATCHes on every launch even though nothing changed. The Swift SDK
-   does not carry this bug forward — this is a factual difference in behavior, not a criticism
-   of the Flutter implementation.
+5. **The device-registration comparison compares like for like.** The Flutter
+   `DeviceService.registerDevice` originally compared the saved raw OS permission against
+   the effective (permission AND preference) value, so a device whose developer disabled
+   notifications PATCHed on every launch even though nothing had changed. The Swift SDK was
+   written to compare raw against raw; the Flutter SDK has since been fixed the same way, so
+   the two now match.
 6. **The notification preference is saved only after a successful server update, not before.**
-   The Flutter `DeviceService.setNotificationEnabled` persists the local preference before
-   making the PATCH request, so a failed request leaves the local and remote state
-   disagreeing. The Swift SDK updates local state only once the server call has succeeded.
-7. **Products are split three ways instead of pulling in every auth SDK.** The Flutter SDK
+   The Flutter `DeviceService.setNotificationEnabled` originally persisted the local
+   preference before making the PATCH, so a failed request left local and remote state
+   disagreeing. The Swift SDK persists only once the server confirms; the Flutter SDK has
+   since been fixed the same way, so the two now match.
+7. **Storage keys are read with a `flutter.` fallback.** `shared_preferences` prefixes every
+   key it writes with `flutter.`, so an app migrating from the Flutter SDK holds its state
+   under `flutter.pushfire_device_id`. The Swift SDK reads the unprefixed key first, falls
+   back to the prefixed one, and adopts the value unprefixed — without this, a migrating app
+   would look unregistered and create a second device row for the same physical device. If
+   your app runs both SDKs at once, note that only the Swift SDK follows the fallback;
+   writes are never mirrored back to the prefixed key.
+8. **Products are split three ways instead of pulling in every auth SDK.** The Flutter SDK
    depends on `firebase_auth` and `supabase_flutter` regardless of whether you use them. The
    Swift SDK splits `PushFireFirebaseAuth` and `PushFireSupabaseAuth` into separate SPM
    products from the core `PushFire` library, so a consumer using neither downloads neither

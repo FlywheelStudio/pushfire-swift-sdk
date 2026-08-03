@@ -165,3 +165,70 @@ private func makeServices(
     let recorded = await transport.recorded
     #expect(recorded.isEmpty)
 }
+
+@Test func persistWritesBothKeysOrNeither() async throws {
+    // Writing the id first and then failing to encode would leave subscriberId()
+    // reporting a logged-in user that currentSubscriber() and isLoggedIn() cannot see.
+    // Nothing later reconciles that split, so persist has to be all-or-nothing.
+    let transport = FakeTransport(response: .ok("{}"))
+    let (service, store) = makeServices(transport: transport)
+
+    let unencodable = Subscriber(
+        id: "sub_1",
+        deviceId: "dev_1",
+        externalId: "ext_1",
+        metadata: ["broken": .double(.nan)]
+    )
+
+    await service.persist(unencodable)
+
+    #expect(store.string(forKey: StorageKey.subscriberId) == nil)
+    #expect(store.string(forKey: StorageKey.subscriberData) == nil)
+    #expect(await service.isLoggedIn() == false)
+    #expect(await service.subscriberId() == nil)
+}
+
+@Test func currentSubscriberReturnsNilForAnUndecodableStoredBlob() async throws {
+    // Corrupted or schema-drifted local state must degrade to "nobody is logged in".
+    // Throwing here would take down every caller — `isLoggedIn()`, tag writes, the
+    // auth observer — none of which can throw.
+    let transport = FakeTransport(responses: [])
+    let store = FakeStore([
+        StorageKey.deviceId: "dev_1",
+        StorageKey.subscriberId: "sub_1",
+        StorageKey.subscriberData: #"{"id":"sub_1","externalId""#,
+    ])
+    let (service, _) = makeServices(transport: transport, store: store)
+
+    #expect(await service.currentSubscriber() == nil)
+    #expect(await service.isLoggedIn() == false)
+    // The id lives under its own key and is untouched by the unreadable blob.
+    #expect(await service.subscriberId() == "sub_1")
+}
+
+@Test func currentSubscriberReturnsNilWhenStoredBlobIsMissingRequiredFields() async throws {
+    // Valid JSON of the wrong shape — what an older or newer SDK version could leave
+    // behind — takes the same path as outright corruption.
+    let transport = FakeTransport(responses: [])
+    let store = FakeStore([
+        StorageKey.deviceId: "dev_1",
+        StorageKey.subscriberData: #"{"id":"sub_1"}"#,
+    ])
+    let (service, _) = makeServices(transport: transport, store: store)
+
+    #expect(await service.currentSubscriber() == nil)
+    #expect(await service.isLoggedIn() == false)
+}
+
+@Test func persistWritesBothKeysOnSuccess() async throws {
+    let transport = FakeTransport(response: .ok("{}"))
+    let (service, store) = makeServices(transport: transport)
+
+    let subscriber = Subscriber(id: "sub_1", deviceId: "dev_1", externalId: "ext_1")
+
+    await service.persist(subscriber)
+
+    #expect(store.string(forKey: StorageKey.subscriberId) == "sub_1")
+    #expect(store.string(forKey: StorageKey.subscriberData) != nil)
+    #expect(await service.isLoggedIn() == true)
+}
