@@ -27,9 +27,10 @@ private func makeCore(
 
 /// Waits for the next event, failing rather than hanging if none arrives.
 ///
-/// Nanoseconds rather than `Duration`: `Duration` and `Task.sleep(for:)` are iOS 16+,
-/// and the test target inherits the package's iOS 15 floor. Gating these tests behind
-/// `@available(iOS 16, *)` would silently skip them on the floor we actually ship to.
+/// Nanoseconds rather than `Duration`: this predates the package's iOS 16 floor, back
+/// when `Duration` and `Task.sleep(for:)` (iOS 16+) were unavailable at the package's
+/// then-iOS-15 floor. It is kept as-is because it works and there's no value in
+/// churning it now that the floor has moved.
 private func nextEvent(
     _ stream: AsyncStream<PushFireEvent>,
     timeoutNanoseconds: UInt64 = 2_000_000_000

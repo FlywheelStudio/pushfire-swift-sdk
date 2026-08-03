@@ -2,9 +2,10 @@ import Foundation
 
 /// A duration in milliseconds for the APNs poll loop.
 ///
-/// `Duration` (Swift's standard type) requires iOS 16, but this package's floor is
-/// iOS 15 to match FirebaseMessaging's own requirement (see Package.swift). This is a
-/// minimal stand-in exposing only the `.milliseconds(_:)` factory the poll loop needs,
+/// This predates the package's iOS 16 floor and was originally a stand-in for
+/// `Duration` (Swift's standard type, iOS 16+) back when this package's floor was
+/// iOS 15. It is kept as-is because it works and there's no value in churning it: a
+/// minimal type exposing only the `.milliseconds(_:)` factory the poll loop needs,
 /// so call sites read the same as they would with `Duration`.
 struct PollInterval: Sendable {
     fileprivate let nanoseconds: UInt64
