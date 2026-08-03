@@ -25,3 +25,73 @@ import Testing
     store.setString("dev_1", forKey: StorageKey.deviceId)
     #expect(store.string(forKey: StorageKey.deviceId) == "dev_1")
 }
+
+// MARK: - Migration from the Flutter SDK
+//
+// `shared_preferences` writes every key with a hardcoded `flutter.` prefix, so an
+// app that shipped the Flutter SDK has its state under `flutter.pushfire_device_id`.
+// Reading nil there would register a duplicate device row for the same device.
+
+@Test func storeInheritsFlutterWrittenString() {
+    let suite = "pushfire.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    let store = UserDefaultsStore(suiteName: suite)
+    defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+    defaults.set("dev_from_flutter", forKey: "flutter.\(StorageKey.deviceId)")
+
+    #expect(store.string(forKey: StorageKey.deviceId) == "dev_from_flutter")
+    // Adopted under the unprefixed key, so later reads no longer depend on the fallback.
+    #expect(defaults.string(forKey: StorageKey.deviceId) == "dev_from_flutter")
+}
+
+@Test func storeInheritsFlutterWrittenFalseWithoutConfusingItForUnset() {
+    let suite = "pushfire.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    let store = UserDefaultsStore(suiteName: suite)
+    defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+    defaults.set(false, forKey: "flutter.\(StorageKey.notificationPreference)")
+
+    // `false` must survive as `false`, not collapse to nil — the whole permission
+    // state machine keys off unset-vs-false.
+    #expect(store.bool(forKey: StorageKey.notificationPreference) == false)
+    #expect(defaults.object(forKey: StorageKey.notificationPreference) as? Bool == false)
+}
+
+@Test func storePrefersItsOwnValueOverTheFlutterOne() {
+    let suite = "pushfire.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    let store = UserDefaultsStore(suiteName: suite)
+    defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+    defaults.set("stale_flutter_value", forKey: "flutter.\(StorageKey.deviceId)")
+    store.setString("dev_native", forKey: StorageKey.deviceId)
+
+    #expect(store.string(forKey: StorageKey.deviceId) == "dev_native")
+}
+
+@Test func storeRemovalDoesNotResurrectTheFlutterValue() {
+    let suite = "pushfire.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    let store = UserDefaultsStore(suiteName: suite)
+    defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+    defaults.set("dev_from_flutter", forKey: "flutter.\(StorageKey.deviceId)")
+    #expect(store.string(forKey: StorageKey.deviceId) == "dev_from_flutter")
+
+    store.remove(forKey: StorageKey.deviceId)
+
+    // clearDeviceData() and logout must actually erase. Falling back to the prefixed
+    // key here would hand the caller back state it just deleted.
+    #expect(store.string(forKey: StorageKey.deviceId) == nil)
+}
+
+@Test func storeReturnsNilWhenNeitherKeyIsSet() {
+    let suite = "pushfire.tests.\(UUID().uuidString)"
+    let store = UserDefaultsStore(suiteName: suite)
+    defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+    #expect(store.string(forKey: StorageKey.deviceId) == nil)
+    #expect(store.bool(forKey: StorageKey.notificationPreference) == nil)
+}
