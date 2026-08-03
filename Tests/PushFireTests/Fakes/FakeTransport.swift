@@ -37,8 +37,22 @@ actor FakeTransport: HTTPTransport {
         }
     }
 
+    /// Tracks `close()`, which the protocol declares nonisolated and synchronous, so it
+    /// cannot touch this actor's isolated state.
+    private final class ClosedFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var closed = false
+
+        var value: Bool { lock.withLock { closed } }
+        func set() { lock.withLock { closed = true } }
+    }
+
     private var queued: [Response]
     private(set) var recorded: [URLRequest] = []
+    private nonisolated let closedFlag = ClosedFlag()
+
+    /// Whether `close()` has been called. Used to prove `shutdown()` releases the session.
+    nonisolated var didClose: Bool { closedFlag.value }
 
     init(responses: [Response]) {
         self.queued = responses
@@ -46,6 +60,10 @@ actor FakeTransport: HTTPTransport {
 
     init(response: Response) {
         self.queued = [response]
+    }
+
+    nonisolated func close() {
+        closedFlag.set()
     }
 
     nonisolated func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {

@@ -196,3 +196,71 @@ private func nextEvent(
 
     await core.shutdown()
 }
+
+// MARK: - Event contract
+
+/// Collects events off the stream for a bounded window.
+private actor EventCollector {
+    private(set) var events: [PushFireEvent] = []
+    func append(_ event: PushFireEvent) { events.append(event) }
+}
+
+private func deviceRegisteredCount(_ events: [PushFireEvent]) -> Int {
+    events.filter {
+        if case .deviceRegistered = $0 { return true }
+        return false
+    }.count
+}
+
+@Test func tokenRefreshEmitsOneDeviceRegisteredWhenPermissionAlsoChanged() async throws {
+    // A token rotation that coincides with a permission change drives two code paths:
+    // the coalesced permission check and the re-registration. Only one of them may
+    // announce the device, or a consumer treating the event as "state changed,
+    // re-render" double-fires. The Flutter SDK emits exactly one.
+    let store = FakeStore([
+        StorageKey.deviceId: "dev_1",
+        StorageKey.fcmToken: "old-token",
+    ])
+    let permissions = FakePermissionProvider(status: .authorized)
+    let tokens = FakeTokenProvider(fcm: "old-token")
+    let transport = FakeTransport(
+        responses: Array(repeating: .ok(#"{"id":"dev_1"}"#), count: 6)
+    )
+    let core = makeCore(
+        transport: transport, store: store, permissions: permissions, tokens: tokens)
+
+    // start() registers and stores lastPermissionStatus, so the permission has to change
+    // afterwards for the refresh to see a real change. Revoking it before start would
+    // leave nothing for the check to detect.
+    await core.start()
+
+    // Subscribe after start so the auto-registration event is not counted.
+    let events = await core.eventStream()
+    let collector = EventCollector()
+    let pump = Task {
+        for await event in events { await collector.append(event) }
+    }
+
+    permissions.setStatus(.denied)
+    tokens.setFCM("new-token")
+    tokens.emitRefresh("new-token")
+    try await Task.sleep(nanoseconds: 500_000_000)
+    pump.cancel()
+
+    let collected = await collector.events
+    #expect(deviceRegisteredCount(collected) == 1)
+    #expect(collected.contains(.pushTokenRefreshed("new-token")))
+}
+
+@Test func shutdownReleasesTheTransport() async throws {
+    // A URLSession outlives its owner until invalidated, so every configure/shutdown
+    // cycle would otherwise leak one.
+    let transport = FakeTransport(response: .ok(#"{"id":"dev_1"}"#))
+    let core = makeCore(transport: transport)
+
+    await core.start()
+    #expect(transport.didClose == false)
+
+    await core.shutdown()
+    #expect(transport.didClose == true)
+}

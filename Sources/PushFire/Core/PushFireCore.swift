@@ -13,6 +13,9 @@ actor PushFireCore {
     private let lifecycle: any AppLifecycleObserver
     private let authProvider: (any AuthProvider)?
     private let logger: PushFireLogger
+    /// Retained so `shutdown()` can release it. A `URLSession` outlives the objects that
+    /// use it until explicitly invalidated.
+    private let transport: any HTTPTransport
 
     private var device: Device?
     private var observers: [Task<Void, Never>] = []
@@ -41,6 +44,7 @@ actor PushFireCore {
         self.tokens = tokens
         self.lifecycle = lifecycle
         self.authProvider = authProvider
+        self.transport = transport
 
         self.deviceService = DeviceService(
             apiClient: apiClient,
@@ -107,6 +111,9 @@ actor PushFireCore {
         permissionCheck?.cancel()
         permissionCheck = nil
         await broadcaster.finish()
+        // Cancels in-flight requests and releases the session, mirroring the Flutter
+        // SDK's dispose() closing its http client.
+        transport.close()
         logger.info("SDK shut down")
     }
 
@@ -137,10 +144,12 @@ actor PushFireCore {
 
     private func handleTokenRefresh(_ token: String) async {
         logger.info("Push token refreshed")
-        // Routed through syncNotificationPermission() rather than calling
-        // deviceService.checkAndHandlePermissionStatusChange() directly, so this path is
-        // coalesced by the same permissionCheck guard as the foreground observer.
-        _ = await syncNotificationPermission()
+        // Coalesced by the same permissionCheck guard as the foreground observer, but
+        // deliberately does not emit: the registerDevice() below already emits
+        // .deviceRegistered for this refresh. Emitting here too would produce two
+        // events for one logical change whenever a token rotation coincides with a
+        // permission change. The Flutter SDK emits exactly one.
+        _ = await coalescedPermissionCheck()
         do {
             if let registered = try await deviceService.registerDevice() {
                 device = registered
@@ -313,6 +322,13 @@ actor PushFireCore {
         try await workflowService.run(workflowId, target: target, at: date)
     }
 
+    @discardableResult
+    func createWorkflowExecution(
+        _ request: WorkflowExecutionRequest
+    ) async throws -> WorkflowExecutionResponse {
+        try await workflowService.createWorkflowExecution(request)
+    }
+
     // MARK: - Notifications
 
     func requestNotificationPermission() async throws -> Bool {
@@ -338,23 +354,36 @@ actor PushFireCore {
         return result
     }
 
+    /// Runs the permission check, coalescing concurrent callers, and updates `device`.
+    ///
+    /// Returns the refreshed device only to the caller that owns the check, so one
+    /// permission change produces one state update no matter how many callers are
+    /// waiting. Emits nothing — the caller decides whether this change warrants an
+    /// event.
+    private func coalescedPermissionCheck() async -> Device? {
+        if let existing = permissionCheck {
+            _ = await existing.value
+            return nil
+        }
+
+        let task = Task { [deviceService] in
+            await deviceService.checkAndHandlePermissionStatusChange()
+        }
+        permissionCheck = task
+        let updated = await task.value
+        permissionCheck = nil
+
+        if let updated {
+            device = updated
+        }
+        return updated
+    }
+
     /// Re-checks the OS permission and syncs any change, then reports the current status.
     @discardableResult
     func syncNotificationPermission() async -> NotificationStatus {
-        if let existing = permissionCheck {
-            _ = await existing.value
-        } else {
-            let task = Task { [deviceService] in
-                await deviceService.checkAndHandlePermissionStatusChange()
-            }
-            permissionCheck = task
-            let updated = await task.value
-            permissionCheck = nil
-
-            if let updated {
-                device = updated
-                await broadcaster.emit(.deviceRegistered(updated))
-            }
+        if let updated = await coalescedPermissionCheck() {
+            await broadcaster.emit(.deviceRegistered(updated))
         }
         return await deviceService.notificationStatus()
     }

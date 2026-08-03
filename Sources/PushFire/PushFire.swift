@@ -233,6 +233,20 @@ public final class PushFire: Sendable {
         try await core.runWorkflow(workflowId, target: target, at: date)
     }
 
+    /// Sends a fully-formed workflow execution request.
+    ///
+    /// `runWorkflow(_:for:at:)` covers the common cases. This is the escape hatch for a
+    /// request built directly, and the counterpart to the Flutter SDK's
+    /// `createWorkflowExecution`. Without it `WorkflowExecutionRequest` is public but
+    /// unreachable, and any future request field not expressible through
+    /// `WorkflowRunTarget`/`at:` would have no caller.
+    @discardableResult
+    public func createWorkflowExecution(
+        _ request: WorkflowExecutionRequest
+    ) async throws -> WorkflowExecutionResponse {
+        try await core.createWorkflowExecution(request)
+    }
+
     // MARK: - Notifications
 
     /// Prompts for the notification permission. Returns whether it was granted.
