@@ -361,12 +361,22 @@ private func deviceRegisteredCount(_ events: [PushFireEvent]) -> Int {
     permissions.setStatus(.denied)
     tokens.setFCM("new-token")
     tokens.emitRefresh("new-token")
-    try await Task.sleep(nanoseconds: 500_000_000)
+
+    // `.pushTokenRefreshed` is the last event `handleTokenRefresh` emits, so observing it
+    // means the handler has finished and the `deviceRegistered` count is final.
+    //
+    // Waiting for that rather than sleeping a fixed window: a 500 ms sleep here passed
+    // locally and failed on CI with zero events collected, because a contended runner
+    // took tens of seconds to get through this handler. Any fixed window is a guess about
+    // machine speed; this one is a guess about the SDK's own behaviour.
+    let sawRefresh = await waitUntil(attempts: 200) {
+        await collector.events.contains(.pushTokenRefreshed("new-token"))
+    }
     pump.cancel()
 
     let collected = await collector.events
+    #expect(sawRefresh)
     #expect(deviceRegisteredCount(collected) == 1)
-    #expect(collected.contains(.pushTokenRefreshed("new-token")))
 }
 
 @Test func shutdownReleasesTheTransport() async throws {
