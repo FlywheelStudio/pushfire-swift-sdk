@@ -77,7 +77,16 @@ actor APIClient {
         )
 
         guard (200..<300).contains(response.statusCode) else {
-            throw Self.decodeError(statusCode: response.statusCode, body: data)
+            let apiError = Self.decodeError(statusCode: response.statusCode, body: data)
+            // The response body above is logged at debug level and marked `.private`, so
+            // without this line a shipped app gives no usable trace of a 401 or 422. The
+            // message here is the server's own, already extracted, and carries no
+            // credentials.
+            logger.error(
+                "\(endpoint.method) \(endpoint.path) failed with HTTP \(response.statusCode)",
+                apiError
+            )
+            throw apiError
         }
 
         return data.isEmpty ? Data("{}".utf8) : data

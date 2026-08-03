@@ -165,3 +165,38 @@ private func makeServices(
     let recorded = await transport.recorded
     #expect(recorded.isEmpty)
 }
+
+@Test func persistWritesBothKeysOrNeither() async throws {
+    // Writing the id first and then failing to encode would leave subscriberId()
+    // reporting a logged-in user that currentSubscriber() and isLoggedIn() cannot see.
+    // Nothing later reconciles that split, so persist has to be all-or-nothing.
+    let transport = FakeTransport(response: .ok("{}"))
+    let (service, store) = makeServices(transport: transport)
+
+    let unencodable = Subscriber(
+        id: "sub_1",
+        deviceId: "dev_1",
+        externalId: "ext_1",
+        metadata: ["broken": .double(.nan)]
+    )
+
+    await service.persist(unencodable)
+
+    #expect(store.string(forKey: StorageKey.subscriberId) == nil)
+    #expect(store.string(forKey: StorageKey.subscriberData) == nil)
+    #expect(await service.isLoggedIn() == false)
+    #expect(await service.subscriberId() == nil)
+}
+
+@Test func persistWritesBothKeysOnSuccess() async throws {
+    let transport = FakeTransport(response: .ok("{}"))
+    let (service, store) = makeServices(transport: transport)
+
+    let subscriber = Subscriber(id: "sub_1", deviceId: "dev_1", externalId: "ext_1")
+
+    await service.persist(subscriber)
+
+    #expect(store.string(forKey: StorageKey.subscriberId) == "sub_1")
+    #expect(store.string(forKey: StorageKey.subscriberData) != nil)
+    #expect(await service.isLoggedIn() == true)
+}
