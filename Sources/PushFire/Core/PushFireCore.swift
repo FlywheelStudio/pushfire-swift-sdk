@@ -73,7 +73,8 @@ actor PushFireCore {
     /// not available in an actor.
     static func live(
         config: PushFireConfiguration,
-        authProvider: (any AuthProvider)?
+        authProvider: (any AuthProvider)?,
+        pushTokenProvider: (any PushTokenProvider)? = nil
     ) -> PushFireCore {
         PushFireCore(
             config: config,
@@ -81,7 +82,7 @@ actor PushFireCore {
             store: UserDefaultsStore(suiteName: config.userDefaultsSuiteName),
             deviceInfo: SystemDeviceInfoProvider(),
             permissions: UserNotificationsPermissionProvider(),
-            tokens: FirebasePushTokenProvider(),
+            tokens: pushTokenProvider ?? FirebasePushTokenProvider(),
             lifecycle: NotificationCenterLifecycleObserver(),
             authProvider: authProvider
         )
@@ -98,14 +99,14 @@ actor PushFireCore {
     }
 
     /// Cancels the observers and closes the event stream.
-    func shutdown() {
+    func shutdown() async {
         for observer in observers {
             observer.cancel()
         }
         observers.removeAll()
         permissionCheck?.cancel()
         permissionCheck = nil
-        Task { await broadcaster.finish() }
+        await broadcaster.finish()
         logger.info("SDK shut down")
     }
 
@@ -136,7 +137,10 @@ actor PushFireCore {
 
     private func handleTokenRefresh(_ token: String) async {
         logger.info("Push token refreshed")
-        _ = await deviceService.checkAndHandlePermissionStatusChange()
+        // Routed through syncNotificationPermission() rather than calling
+        // deviceService.checkAndHandlePermissionStatusChange() directly, so this path is
+        // coalesced by the same permissionCheck guard as the foreground observer.
+        _ = await syncNotificationPermission()
         do {
             if let registered = try await deviceService.registerDevice() {
                 device = registered
@@ -312,12 +316,12 @@ actor PushFireCore {
     // MARK: - Notifications
 
     func requestNotificationPermission() async throws -> Bool {
-        let granted = try await deviceService.requestNotificationPermission()
-        if granted, let registered = try? await deviceService.registerDevice() {
+        let result = try await deviceService.requestNotificationPermission()
+        if let registered = result.device {
             device = registered
             await broadcaster.emit(.deviceRegistered(registered))
         }
-        return granted
+        return result.granted
     }
 
     func notificationStatus() async -> NotificationStatus {
@@ -367,6 +371,10 @@ actor PushFireCore {
         if await subscriberService.isLoggedIn() {
             try? await logout()
         }
+        // Unconditional: a stored subscriber with a nil id would survive the
+        // `isLoggedIn()`-gated logout above, leaving data behind after a reset that
+        // claims to clear all local state.
+        await subscriberService.clearLocalData()
         await deviceService.clearDeviceData()
         device = nil
         logger.info("SDK reset completed")

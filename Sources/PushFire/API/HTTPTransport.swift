@@ -2,7 +2,9 @@ import Foundation
 
 /// Sends HTTP requests. Injected so tests can assert on exact request bodies
 /// without `URLProtocol` interception.
-public protocol HTTPTransport: Sendable {
+///
+/// Internal: this is a test seam, not a documented integrator extension point.
+protocol HTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 }
 

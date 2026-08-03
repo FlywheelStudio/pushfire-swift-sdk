@@ -184,6 +184,15 @@ actor SubscriberService {
         store.string(forKey: StorageKey.subscriberId)
     }
 
+    /// Clears local subscriber state without calling the server.
+    ///
+    /// Unlike `logout()`, this does not require a logged-in subscriber (a non-nil
+    /// `id`) — it exists so `PushFireCore.reset()` can unconditionally wipe local
+    /// state, including a stored subscriber whose `id` is nil.
+    func clearLocalData() {
+        clear()
+    }
+
     /// Persists a subscriber locally.
     ///
     /// Named `persist` rather than `store` so it does not collide with the `store`

@@ -93,4 +93,9 @@ public struct WorkflowExecutionRequest: Encodable, Sendable, Equatable {
 public struct WorkflowExecutionResponse: Codable, Sendable, Equatable {
     public let id: String?
     public let message: String?
+
+    public init(id: String?, message: String?) {
+        self.id = id
+        self.message = message
+    }
 }

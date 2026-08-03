@@ -22,6 +22,13 @@ public final class PushFire: Sendable {
 
     private static let lock = NSLock()
     nonisolated(unsafe) private static var instance: PushFire?
+    /// The in-flight (or completed) configuration. Concurrent `configure()` callers
+    /// await this same task rather than each building and starting their own core
+    /// against the same `UserDefaults` suite — the same coalescing pattern
+    /// `DeviceService.registerDevice()` uses for registration. A sequential second
+    /// `configure()` call sees this already set and returns the first instance without
+    /// starting a second core, which also avoids a wasted device registration.
+    nonisolated(unsafe) private static var configuration: Task<PushFire, any Error>?
 
     /// Configures the SDK and registers this device.
     ///
@@ -32,25 +39,35 @@ public final class PushFire: Sendable {
     ///   - configuration: API key and options.
     ///   - authProvider: Optional. Supply `FirebaseAuthProvider` or `SupabaseAuthProvider`
     ///     to log subscribers in and out automatically from your auth state.
+    ///   - pushTokenProvider: Optional. Supply your own push-token acquisition instead of
+    ///     the default FirebaseMessaging-backed implementation.
     public static func configure(
         _ configuration: PushFireConfiguration,
-        authProvider: (any AuthProvider)? = nil
+        authProvider: (any AuthProvider)? = nil,
+        pushTokenProvider: (any PushTokenProvider)? = nil
     ) async throws {
         try configuration.validate()
 
-        let core = PushFireCore.live(config: configuration, authProvider: authProvider)
-
-        // Start before publishing. Publishing first leaves a window where a concurrent
-        // `shutdown()` clears the instance while `start()` is still running, stranding a
-        // core with live background observers that nothing can reach or stop.
-        await core.start()
-
-        guard adopt(PushFire(core: core)) else {
-            // Someone else configured while we were starting. Stop the core we started
-            // rather than leaking its observers.
-            await core.shutdown()
-            return
+        let task = lock.withLock { () -> Task<PushFire, any Error> in
+            if let existing = Self.configuration {
+                return existing
+            }
+            let newTask = Task<PushFire, any Error> {
+                let core = PushFireCore.live(
+                    config: configuration,
+                    authProvider: authProvider,
+                    pushTokenProvider: pushTokenProvider
+                )
+                await core.start()
+                let pushFire = PushFire(core: core)
+                lock.withLock { Self.instance = pushFire }
+                return pushFire
+            }
+            Self.configuration = newTask
+            return newTask
         }
+
+        _ = try await task.value
     }
 
     /// The configured SDK instance.
@@ -58,38 +75,31 @@ public final class PushFire: Sendable {
     /// - Throws: `PushFireError.notInitialized` if `configure` has not completed.
     public static var shared: PushFire {
         get throws {
-            lock.lock()
-            defer { lock.unlock() }
-            guard let instance else { throw PushFireError.notInitialized }
+            guard let instance = lock.withLock({ Self.instance }) else {
+                throw PushFireError.notInitialized
+            }
             return instance
         }
     }
 
     /// Whether `configure` has completed.
     public static var isConfigured: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return instance != nil
+        lock.withLock { Self.instance != nil }
     }
 
     /// Stops the SDK's observers and releases the instance.
     public static func shutdown() async {
-        let existing = lock.withLock {
-            let existing = instance
-            instance = nil
+        let existing = lock.withLock { () -> Task<PushFire, any Error>? in
+            let existing = Self.configuration
+            Self.configuration = nil
+            Self.instance = nil
             return existing
         }
 
-        await existing?.core.shutdown()
-    }
-
-    /// Adopts `candidate` as the instance. Returns false if one already exists.
-    private static func adopt(_ candidate: PushFire) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard instance == nil else { return false }
-        instance = candidate
-        return true
+        guard let existing else { return }
+        if let pushFire = try? await existing.value {
+            await pushFire.core.shutdown()
+        }
     }
 
     /// Installs a core built with test doubles.
@@ -97,10 +107,26 @@ public final class PushFire: Sendable {
     /// Deliberately does not shut down an existing instance first, so tests can verify
     /// that configuring twice is a no-op. Call `shutdown()` explicitly to reset.
     static func configureForTesting(core: PushFireCore) async {
-        await core.start()
-        if !adopt(PushFire(core: core)) {
+        let (task, isWinner) = lock.withLock { () -> (Task<PushFire, any Error>, Bool) in
+            if let existing = Self.configuration {
+                return (existing, false)
+            }
+            let newTask = Task<PushFire, any Error> {
+                await core.start()
+                let pushFire = PushFire(core: core)
+                lock.withLock { Self.instance = pushFire }
+                return pushFire
+            }
+            Self.configuration = newTask
+            return (newTask, true)
+        }
+
+        if !isWinner {
+            // Someone else already configured. Shut down the core we were handed
+            // instead of leaking it or starting it needlessly.
             await core.shutdown()
         }
+        _ = try? await task.value
     }
 
     // MARK: - Subscribers

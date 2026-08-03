@@ -212,6 +212,27 @@ private func makeService(
     }
 }
 
+@Test func concurrentRegisterDeviceCoalescesIntoOneRequest() async throws {
+    // Only one response is queued: if the in-flight guard failed to coalesce, the
+    // second concurrent call would consume a second request and throw
+    // "FakeTransport ran out of queued responses" rather than returning dev_1.
+    let transport = FakeTransport(response: .ok(#"{"id":"dev_1"}"#))
+    let store = FakeStore()
+    let service = makeService(transport: transport, store: store)
+
+    async let first = service.registerDevice()
+    async let second = service.registerDevice()
+
+    let (firstDevice, secondDevice) = try await (first, second)
+
+    #expect(firstDevice?.id == "dev_1")
+    #expect(secondDevice?.id == "dev_1")
+
+    let recorded = await transport.recorded
+    #expect(recorded.count == 1)
+    #expect(recorded[0].url?.lastPathComponent == "register-device")
+}
+
 @Test func clearDeviceDataRemovesAllDeviceKeys() async throws {
     let store = FakeStore([
         StorageKey.deviceId: "dev_1",

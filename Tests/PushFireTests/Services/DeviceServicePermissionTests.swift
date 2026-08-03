@@ -278,9 +278,10 @@ private func registeredStore(
     let permissions = FakePermissionProvider(status: .notDetermined, requestResult: .authorized)
     let service = makeService(transport: transport, store: FakeStore(), permissions: permissions)
 
-    let granted = try await service.requestNotificationPermission()
+    let result = try await service.requestNotificationPermission()
 
-    #expect(granted == true)
+    #expect(result.granted == true)
+    #expect(result.device?.id == "dev_1")
     let recorded = await transport.recorded
     #expect(recorded.count == 1)
     #expect(recorded[0].url?.lastPathComponent == "register-device")
@@ -291,9 +292,10 @@ private func registeredStore(
     let permissions = FakePermissionProvider(status: .notDetermined, requestResult: .denied)
     let service = makeService(transport: transport, store: FakeStore(), permissions: permissions)
 
-    let granted = try await service.requestNotificationPermission()
+    let result = try await service.requestNotificationPermission()
 
-    #expect(granted == false)
+    #expect(result.granted == false)
+    #expect(result.device == nil)
     let recorded = await transport.recorded
     #expect(recorded.isEmpty)
 }

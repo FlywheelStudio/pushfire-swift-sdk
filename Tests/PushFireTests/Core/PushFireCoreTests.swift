@@ -27,10 +27,10 @@ private func makeCore(
 
 /// Waits for the next event, failing rather than hanging if none arrives.
 ///
-/// Nanoseconds rather than `Duration`: this predates the package's iOS 16 floor, back
-/// when `Duration` and `Task.sleep(for:)` (iOS 16+) were unavailable at the package's
-/// then-iOS-15 floor. It is kept as-is because it works and there's no value in
-/// churning it now that the floor has moved.
+/// Nanoseconds rather than `Duration`: this predates the package's iOS 16 floor, from
+/// before `Duration` and `Task.sleep(for:)` (iOS 16+) were available to the package. It
+/// is kept as-is because it works and there's no value in churning it now that the
+/// floor has moved.
 private func nextEvent(
     _ stream: AsyncStream<PushFireEvent>,
     timeoutNanoseconds: UInt64 = 2_000_000_000

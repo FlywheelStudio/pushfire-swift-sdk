@@ -43,7 +43,12 @@ public struct SupabaseAuthProvider: AuthProvider {
             guard let user = session?.user else { return nil }
             return .signedIn(
                 AuthUser(
-                    id: user.id.uuidString,
+                    // `UUID.uuidString` is uppercase, but the Flutter SDK sends Supabase's
+                    // raw `sub` claim, which is lowercase. The backend compares
+                    // `externalId` as case-sensitive text, so mismatched case here would
+                    // fork the same Supabase user into two different subscriber rows
+                    // depending on which SDK logged them in.
+                    id: user.id.uuidString.lowercased(),
                     name: user.userMetadata["full_name"]?.stringValue,
                     email: user.email,
                     phone: user.phone

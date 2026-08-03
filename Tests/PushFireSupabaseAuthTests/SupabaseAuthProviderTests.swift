@@ -49,7 +49,7 @@ private func makeSession(user: User) -> Session {
             event
                 == .signedIn(
                     AuthUser(
-                        id: user.id.uuidString,
+                        id: user.id.uuidString.lowercased(),
                         name: "Ada Lovelace",
                         email: "person@example.com",
                         phone: "+15551234567"
@@ -67,7 +67,7 @@ private func makeSession(user: User) -> Session {
             event
                 == .signedIn(
                     AuthUser(
-                        id: user.id.uuidString,
+                        id: user.id.uuidString.lowercased(),
                         name: "Ada Lovelace",
                         email: "person@example.com",
                         phone: "+15551234567"
@@ -85,7 +85,7 @@ private func makeSession(user: User) -> Session {
             event
                 == .signedIn(
                     AuthUser(
-                        id: user.id.uuidString,
+                        id: user.id.uuidString.lowercased(),
                         name: "Ada Lovelace",
                         email: "person@example.com",
                         phone: "+15551234567"
@@ -107,6 +107,24 @@ private func makeSession(user: User) -> Session {
         let session = makeSession(user: user)
 
         #expect(SupabaseAuthProvider.authEvent(for: .passwordRecovery, session: session) == nil)
+    }
+
+    @Test func signedInEmitsLowercasedId() {
+        // supabase-swift types `User.id` as `UUID`, and `UUID.uuidString` renders
+        // uppercase. The Flutter SDK sends the raw (lowercase) `sub` claim, and the
+        // backend compares `externalId` as case-sensitive text, so this must be
+        // lowercased or the same Supabase user forks into two subscriber rows.
+        let id = UUID(uuidString: "3F8E1C2A-1234-4ABC-8DEF-0123456789AB")!
+        let user = makeUser(id: id)
+        let session = makeSession(user: user)
+
+        let event = SupabaseAuthProvider.authEvent(for: .signedIn, session: session)
+
+        guard case .signedIn(let authUser) = event else {
+            Issue.record("Expected signedIn event")
+            return
+        }
+        #expect(authUser.id == "3f8e1c2a-1234-4abc-8def-0123456789ab")
     }
 
     @Test func emptyEmailNormalisesToNil() {

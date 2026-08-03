@@ -2,17 +2,24 @@ import Foundation
 
 /// A duration in milliseconds for the APNs poll loop.
 ///
-/// This predates the package's iOS 16 floor and was originally a stand-in for
-/// `Duration` (Swift's standard type, iOS 16+) back when this package's floor was
-/// iOS 15. It is kept as-is because it works and there's no value in churning it: a
-/// minimal type exposing only the `.milliseconds(_:)` factory the poll loop needs,
-/// so call sites read the same as they would with `Duration`.
+/// This predates the package's iOS 16 floor: it was originally a stand-in for
+/// `Duration` (Swift's standard type, iOS 16+) before the floor was raised. It is kept
+/// as-is because it works and there's no value in churning it: a minimal type exposing
+/// only the `.milliseconds(_:)` factory the poll loop needs, so call sites read the
+/// same as they would with `Duration`.
 struct PollInterval: Sendable {
     fileprivate let nanoseconds: UInt64
 
     static func milliseconds(_ value: Int) -> PollInterval {
         PollInterval(nanoseconds: UInt64(value) * 1_000_000)
     }
+}
+
+/// The result of a manual `requestNotificationPermission()` call: whether the OS
+/// permission was granted, and the device registration it produced, if any.
+struct NotificationPermissionRequest: Sendable {
+    let granted: Bool
+    let device: Device?
 }
 
 /// Registers this device with PushFire and keeps its notification state in sync.
@@ -26,6 +33,12 @@ actor DeviceService {
     private let logger: PushFireLogger
     private let apnsPollInterval: PollInterval
     private let apnsPollAttempts: Int
+    /// The in-flight registration. Concurrent callers await this one rather than
+    /// starting a second registration — the Swift equivalent of
+    /// `PushFireCore.permissionCheck`, applied to `registerDevice()`. Without this,
+    /// two concurrent calls can both observe no stored device id and both POST
+    /// register-device, creating two device rows with one permanently orphaned.
+    private var registrationTask: Task<Device?, any Error>?
 
     init(
         apiClient: APIClient,
@@ -56,6 +69,17 @@ actor DeviceService {
     /// registration once it lands.
     @discardableResult
     func registerDevice() async throws -> Device? {
+        if let existing = registrationTask {
+            return try await existing.value
+        }
+
+        let task = Task { try await self.performRegistration() }
+        registrationTask = task
+        defer { registrationTask = nil }
+        return try await task.value
+    }
+
+    private func performRegistration() async throws -> Device? {
         logger.info("Starting device registration")
 
         guard let fcmToken = await resolveToken() else {
@@ -242,18 +266,23 @@ actor DeviceService {
     }
 
     /// Prompts for the notification permission, re-registering the device if granted.
+    ///
+    /// Returns the re-registered device alongside the granted flag so the caller can
+    /// update its own state from this single registration, rather than re-registering
+    /// a second time itself (which would re-run the APNs poll and FCM token fetch).
     @discardableResult
-    func requestNotificationPermission() async throws -> Bool {
+    func requestNotificationPermission() async throws -> NotificationPermissionRequest {
         logger.info("Manually requesting notification permission")
         let status = await permissions.requestAuthorization(provisional: false)
         let granted = status.isEnabled
 
+        var device: Device?
         if granted {
             logger.info("Permission granted - re-registering device")
-            try await registerDevice()
+            device = try await registerDevice()
         }
 
-        return granted
+        return NotificationPermissionRequest(granted: granted, device: device)
     }
 
     /// Opens this app's page in Settings so the user can grant the permission manually.

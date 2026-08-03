@@ -44,7 +44,17 @@ actor APIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONEncoder().encode(Envelope(data: body))
+        do {
+            request.httpBody = try JSONEncoder().encode(Envelope(data: body))
+        } catch {
+            // Caller-supplied metadata can contain values (e.g. `JSONValue.double(.nan)`)
+            // that make `JSONEncoder` throw a raw `EncodingError`. Every throwing SDK
+            // call is documented to throw `PushFireError`, so that error must not
+            // escape here.
+            throw PushFireError.configuration(
+                "Could not encode the request body: \(error.localizedDescription)"
+            )
+        }
 
         logger.apiRequest(method: endpoint.method, url: url.absoluteString, body: request.httpBody)
 
