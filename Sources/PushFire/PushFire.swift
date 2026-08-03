@@ -88,6 +88,10 @@ public final class PushFire: Sendable {
     }
 
     /// Stops the SDK's observers and releases the instance.
+    ///
+    /// `configure(_:authProvider:pushTokenProvider:)` and `shutdown()` must not be called
+    /// concurrently. Sequential use is safe. Calling them concurrently can leave the SDK
+    /// reporting itself configured while its background observers are stopped.
     public static func shutdown() async {
         let existing = lock.withLock { () -> Task<PushFire, any Error>? in
             let existing = Self.configuration

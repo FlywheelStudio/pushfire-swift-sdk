@@ -54,6 +54,9 @@ which is routine when the app has its own `UNUserNotificationCenterDelegate` or 
 push SDK — you must forward the APNs token to Firebase yourself:
 
 ```swift
+import UIKit
+import FirebaseMessaging
+
 func application(
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
