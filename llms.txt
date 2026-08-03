@@ -1,0 +1,364 @@
+# PushFire Swift SDK
+
+> A native Swift SDK for the PushFire push notification platform: device registration via
+> Firebase Cloud Messaging, subscriber management, tag management, notification permission
+> state, workflow execution, and an SDK event stream.
+
+This file provides AI context for integrating the PushFire Swift SDK into iOS applications.
+
+## Package information
+
+- **Repository**: https://github.com/FlywheelStudio/pushfire-swift-sdk
+- **Version**: `0.1.0`
+- **Platform**: iOS 16.0+
+- **Swift tools version**: 6.0
+- **Products**: `PushFire` (core), `PushFireFirebaseAuth`, `PushFireSupabaseAuth`
+
+## Platform requirements
+
+Requires a real device or a simulator running iOS 16.0 or later. The SDK uses Firebase Cloud
+Messaging, which needs a Firebase project with an iOS app configured and
+`GoogleService-Info.plist` added to the target.
+
+## Installation
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/FlywheelStudio/pushfire-swift-sdk", from: "0.1.0")
+],
+targets: [
+    .target(name: "YourApp", dependencies: [
+        .product(name: "PushFire", package: "pushfire-swift-sdk")
+        // Add one of these only if you want automatic subscriber login:
+        // .product(name: "PushFireFirebaseAuth", package: "pushfire-swift-sdk")
+        // .product(name: "PushFireSupabaseAuth", package: "pushfire-swift-sdk")
+    ])
+]
+```
+
+`PushFire` links `FirebaseMessaging` only. `PushFireFirebaseAuth` adds `FirebaseAuth`.
+`PushFireSupabaseAuth` adds `Supabase` (supabase-swift 2.50+). Add only the products you need.
+
+## IMPORTANT — what the SDK does NOT do automatically
+
+- **`FirebaseApp.configure()` is not called by the SDK.** The host app must call it in its
+  app delegate, before `PushFire.configure` runs.
+- **There is no way to await configuration from a second call site.** `PushFire.shared` either
+  returns the instance or throws `PushFireError.notInitialized` — it does not wait. Sequence
+  all `shared`-touching code after `configure` completes, in the same task. Do not start an
+  event observer in a separate task: it races `configure` and silently gives up if it loses.
+- **If the developer disables the PushFire preference, the SDK will not silently re-enable it**
+  even after the user re-grants the OS permission in Settings. The developer's choice wins.
+
+## Initialization
+
+```swift
+import FirebaseCore
+import PushFire
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        FirebaseApp.configure()
+        return true
+    }
+}
+
+// Somewhere with async context, before anything touches `PushFire.shared`:
+try await PushFire.configure(
+    PushFireConfiguration(apiKey: "your-api-key", enableLogging: true)
+)
+```
+
+With automatic auth-driven subscriber login:
+
+```swift
+import PushFireFirebaseAuth
+try await PushFire.configure(
+    PushFireConfiguration(apiKey: "your-api-key"),
+    authProvider: FirebaseAuthProvider()
+)
+```
+
+```swift
+import PushFireSupabaseAuth
+try await PushFire.configure(
+    PushFireConfiguration(apiKey: "your-api-key"),
+    authProvider: SupabaseAuthProvider(client: supabase)
+)
+```
+
+With a custom push token provider, replacing the default FirebaseMessaging-backed one
+(equivalent to the Flutter SDK's `getFcmTokenOverride`):
+
+```swift
+try await PushFire.configure(
+    PushFireConfiguration(apiKey: "your-api-key"),
+    pushTokenProvider: MyPushTokenProvider()
+)
+```
+
+## Types
+
+```swift
+public final class PushFire: Sendable {
+    public static let sdkVersion: String  // "0.1.0"
+    public static func configure(_ configuration: PushFireConfiguration, authProvider: (any AuthProvider)? = nil, pushTokenProvider: (any PushTokenProvider)? = nil) async throws
+    public static var shared: PushFire { get throws }  // throws .notInitialized until configured
+    public static var isConfigured: Bool { get }
+    public static func shutdown() async
+}
+
+public struct PushFireConfiguration: Sendable {
+    public let apiKey: String
+    public let baseURL: URL  // default https://api.pushfire.app/functions/v1/
+    public let enableLogging: Bool  // default false
+    public let timeout: TimeInterval  // default 30
+    public let requestNotificationPermission: Bool  // default true
+    public let registerWithoutPrompt: Bool  // default false, provisional auth when true and requestNotificationPermission is false
+    public let userDefaultsSuiteName: String?  // default nil; set for app-group sharing with a Notification Service Extension
+    public init(apiKey: String, baseURL: URL = ..., enableLogging: Bool = false, timeout: TimeInterval = 30, requestNotificationPermission: Bool = true, registerWithoutPrompt: Bool = false, userDefaultsSuiteName: String? = nil)
+    public func validate() throws
+}
+
+public protocol AuthProvider: Sendable {
+    var events: AsyncStream<AuthEvent> { get }
+}
+
+public protocol PushTokenProvider: Sendable {
+    func apnsToken() async -> String?  // nil if Apple has not delivered it yet
+    func fcmToken() async -> String?  // nil if not available yet
+    var tokenRefreshes: AsyncStream<String> { get }  // emits whenever the FCM token rotates
+}
+
+public enum AuthEvent: Sendable, Equatable {
+    case signedIn(AuthUser)
+    case signedOut
+}
+
+public struct AuthUser: Sendable, Equatable {
+    public let id: String
+    public let name: String?
+    public let email: String?
+    public let phone: String?
+    public init(id: String, name: String? = nil, email: String? = nil, phone: String? = nil)
+}
+
+// PushFireFirebaseAuth product
+public struct FirebaseAuthProvider: AuthProvider {
+    public init()
+    public var events: AsyncStream<AuthEvent> { get }
+}
+
+// PushFireSupabaseAuth product
+public struct SupabaseAuthProvider: AuthProvider {
+    public init(client: SupabaseClient)
+    public var events: AsyncStream<AuthEvent> { get }
+}
+
+public enum PushFireError: Error, Sendable {
+    case notInitialized  // `PushFire.shared` accessed before `configure` completed
+    case configuration(String)  // invalid configuration or invalid call arguments
+    case device(String)  // device registration or notification-preference failure
+    case subscriber(String)  // subscriber login/update/logout failure
+    case tag(String)  // tag operation failure
+    case network(String)  // timeout, offline, DNS
+    case api(message: String, code: String?, statusCode: Int?, responseBody: String?)  // non-2xx API response
+}
+
+public struct Subscriber: Codable, Sendable, Equatable {
+    public let id: String?
+    public let deviceId: String?
+    public let externalId: String
+    public let name: String?
+    public let email: String?
+    public let phone: String?
+    public let metadata: [String: JSONValue]?
+    public func with(name: String? = nil, email: String? = nil, phone: String? = nil, metadata: [String: JSONValue]? = nil) -> Subscriber
+}
+
+public struct SubscriberTag: Codable, Sendable, Equatable {
+    public let tagId: String
+    public let subscriberId: String
+    public let value: String
+}
+
+public struct BulkTagResult: Sendable, Equatable {
+    public struct Failure: Sendable, Equatable {
+        public let tagId: String
+        public let message: String
+    }
+    public let succeeded: [SubscriberTag]  // for removals, `value` is empty; `tagId` is what matters
+    public let failed: [Failure]
+    public var isCompleteSuccess: Bool { get }  // true when `failed` is empty
+}
+
+public enum JSONValue: Codable, Sendable, Equatable {
+    case string(String)
+    case int(Int)
+    case double(Double)
+    case bool(Bool)
+    case array([JSONValue])
+    case object([String: JSONValue])
+    case null
+}
+
+public struct Device: Codable, Sendable, Equatable {
+    public let id: String?
+    public let fcmToken: String
+    public let os: String
+    public let osVersion: String
+    public let language: String
+    public let manufacturer: String
+    public let model: String
+    public let appVersion: String
+    public let pushNotificationEnabled: Bool
+    public func with(id: String? = nil, fcmToken: String? = nil, pushNotificationEnabled: Bool? = nil) -> Device
+}
+
+public struct NotificationStatus: Sendable, Equatable {
+    public let isPermissionGranted: Bool  // OS-level permission
+    public let isEnabled: Bool  // PushFire preference; meaningful only when isPermissionGranted
+}
+
+public enum SetNotificationResult: Sendable, Equatable {
+    case success
+    case systemPermissionDenied  // OS permission is denied; nothing was changed, no network call made
+}
+
+public enum WorkflowRunTarget: Sendable, Equatable {
+    case subscribers([String])  // PushFire subscriber ids, must be UUIDs
+    case segments([String])  // PushFire segment ids, must be UUIDs
+}
+
+public struct WorkflowExecutionResponse: Codable, Sendable, Equatable {
+    public let id: String?
+    public let message: String?
+    public init(id: String?, message: String?)
+}
+
+public enum PushFireEvent: Sendable, Equatable {
+    case deviceRegistered(Device)
+    case subscriberLoggedIn(Subscriber)
+    case subscriberLoggedOut
+    case pushTokenRefreshed(String)
+}
+```
+
+## Core APIs (all called through `try await PushFire.shared.<member>`)
+
+The `try` is required on every call because `PushFire.shared` itself throws
+`PushFireError.notInitialized`, not because the underlying method throws.
+
+### Subscribers
+
+```swift
+@discardableResult func login(externalId: String, name: String? = nil, email: String? = nil, phone: String? = nil, metadata: [String: JSONValue]? = nil) async throws -> Subscriber
+@discardableResult func updateSubscriber(name: String? = nil, email: String? = nil, phone: String? = nil, metadata: [String: JSONValue]? = nil) async throws -> Subscriber
+func logout() async throws
+var currentSubscriber: Subscriber? { get async }
+var isSubscriberLoggedIn: Bool { get async }
+func subscriberId() async -> String?
+```
+
+### Tags
+
+```swift
+@discardableResult func addTag(_ tagId: String, value: String) async throws -> SubscriberTag
+@discardableResult func updateTag(_ tagId: String, value: String) async throws -> SubscriberTag
+func removeTag(_ tagId: String) async throws
+@discardableResult func addTags(_ tags: [(String, String)]) async throws -> BulkTagResult  // sequential, partial-failure reporting
+@discardableResult func updateTags(_ tags: [(String, String)]) async throws -> BulkTagResult
+@discardableResult func removeTags(_ tagIds: [String]) async throws -> BulkTagResult
+```
+
+### Workflows
+
+```swift
+@discardableResult func runWorkflow(_ workflowId: String, for target: WorkflowRunTarget, at date: Date? = nil) async throws -> WorkflowExecutionResponse
+// date == nil -> runs immediately; date != nil -> scheduled. workflowId and every target value must be valid UUIDs.
+```
+
+### Notifications
+
+```swift
+@discardableResult func requestNotificationPermission() async throws -> Bool
+func notificationStatus() async -> NotificationStatus
+@discardableResult func setNotificationEnabled(_ enabled: Bool) async throws -> SetNotificationResult
+// enabling while the OS permission is denied returns .systemPermissionDenied and makes no network call
+@discardableResult func syncNotificationPermission() async -> NotificationStatus
+// re-checks the OS permission and syncs any change; the SDK also does this automatically on foreground
+@discardableResult func openNotificationSettings() async -> Bool
+// no `throws` of its own, but the call still needs `try` because of the `shared` accessor
+```
+
+### Device and events
+
+```swift
+var currentDevice: Device? { get async }
+func deviceId() async -> String?
+var events: AsyncStream<PushFireEvent> { get async }  // each access returns an independent stream
+func reset() async throws  // logs out and clears all local SDK state
+```
+
+## Notification permission model
+
+Two independent states, both required to actually deliver notifications:
+
+1. OS permission (`NotificationStatus.isPermissionGranted`) — owned by the system.
+2. PushFire preference (`NotificationStatus.isEnabled`) — owned by the app, set via
+   `setNotificationEnabled(_:)`.
+
+`setNotificationEnabled(true)` fails fast with `.systemPermissionDenied` and no network call
+when the OS permission is denied. The SDK re-syncs the OS permission automatically whenever
+the app returns to the foreground; `syncNotificationPermission()` forces that sync on demand
+(typically right after `openNotificationSettings()`). If the app previously turned the
+PushFire preference off, a later OS re-grant does not turn it back on automatically — the
+app's own preference wins.
+
+## Error handling
+
+```swift
+do {
+    try await PushFire.shared.login(externalId: "user_123")
+} catch PushFireError.api(let message, let code, let statusCode, _) {
+    // server error: message, error code, HTTP status
+} catch {
+    // PushFireError.notInitialized / .configuration / .device / .subscriber / .tag / .network
+}
+```
+
+## iOS configuration
+
+In the target's Signing & Capabilities:
+
+1. Add **Push Notifications**.
+2. Add **Background Modes**, enable **Remote notifications**.
+
+## Differences from the Flutter SDK (pushfire_sdk)
+
+1. `PushFire.shared` throws `.notInitialized` before configuration; Flutter's
+   `PushFireSDK.instance` does not throw. Every Swift call through `shared` needs `try`.
+2. `addTags`/`updateTags`/`removeTags` return `BulkTagResult` (`succeeded` + `failed`); the
+   Flutter SDK's `addTags`/`updateTags` log failures and return only the successes, while
+   `removeTags` returns `Future<void>` with no result reporting.
+3. Workflow execution is one `runWorkflow(_:for:at:)` with `WorkflowRunTarget`; Flutter has
+   four separate methods (`createImmediateWorkflowForSubscribers/Segments`,
+   `createScheduledWorkflowForSubscribers/Segments`).
+4. Platform floor is iOS 16.0 (raised from an initial iOS 15 target because
+   `supabase-swift` 2.50+ requires iOS 16).
+5. Device re-registration compares the correct saved value; the Flutter SDK's
+   `DeviceService.registerDevice` compares the raw OS permission against the effective value,
+   causing an unnecessary PATCH on every launch for devices with the preference off. Not
+   reproduced here.
+6. The local notification preference is saved only after a successful server PATCH; the
+   Flutter SDK's `DeviceService.setNotificationEnabled` saves it before the PATCH, so a failed
+   request leaves local and remote state disagreeing. Not reproduced here.
+7. Three separate SPM products (`PushFire`, `PushFireFirebaseAuth`, `PushFireSupabaseAuth`)
+   instead of one package that always pulls in both `firebase_auth` and `supabase_flutter`.
+
+## Links
+
+- Repository: https://github.com/FlywheelStudio/pushfire-swift-sdk

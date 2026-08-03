@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: xcodebuild -version
+      - name: Lint
+        run: xcrun swift-format lint --recursive --strict Sources Tests
+      - name: Build
+        run: xcodebuild build -scheme PushFire -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
+      - name: Test
+        # PushFire-Package is the only scheme that runs every test bundle; the
+        # per-product PushFire scheme is library-only and has no test action.
+        run: xcodebuild test -scheme PushFire-Package -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
+      - name: Generate example project
+        run: |
+          brew install xcodegen
+          cd Example && xcodegen generate
+      - name: Build example
+        run: |
+          xcodebuild build -project Example/PushFireExample.xcodeproj \
+            -scheme PushFireExample \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro'

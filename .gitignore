@@ -1,0 +1,10 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcuserstate
+xcuserdata/
+Package.resolved
+DerivedData/
+Example/PushFireExample.xcodeproj/
+Example/PushFireExample/GoogleService-Info.plist
+Example/PushFireExample/PushFireExample.entitlements
