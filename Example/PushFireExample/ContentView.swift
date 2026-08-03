@@ -1,3 +1,4 @@
+import Foundation
 import PushFire
 import SwiftUI
 
@@ -55,8 +56,26 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("PushFire")
-            .task { await observe() }
-            .task { await refresh() }
+            .task {
+                // Configure before observing. `PushFire.shared` throws until configure
+                // completes, so starting the event loop in a separate task would race it
+                // and silently give up.
+                do {
+                    try await PushFire.configure(
+                        PushFireConfiguration(
+                            apiKey: ProcessInfo.processInfo
+                                .environment["PUSHFIRE_API_KEY"] ?? "",
+                            enableLogging: true
+                        )
+                    )
+                } catch {
+                    log.insert("configure failed: \(error)", at: 0)
+                    return
+                }
+
+                await refresh()
+                await observe()
+            }
         }
     }
 

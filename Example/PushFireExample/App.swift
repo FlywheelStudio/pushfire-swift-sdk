@@ -21,19 +21,6 @@ struct PushFireExampleApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .task {
-                    do {
-                        try await PushFire.configure(
-                            PushFireConfiguration(
-                                apiKey: ProcessInfo.processInfo
-                                    .environment["PUSHFIRE_API_KEY"] ?? "",
-                                enableLogging: true
-                            )
-                        )
-                    } catch {
-                        print("PushFire configure failed: \(error)")
-                    }
-                }
         }
     }
 }

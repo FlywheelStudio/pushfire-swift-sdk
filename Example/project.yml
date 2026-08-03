@@ -16,6 +16,8 @@ targets:
       path: PushFireExample/Info.plist
       properties:
         UILaunchScreen: {}
+        UIBackgroundModes:
+          - remote-notification
     dependencies:
       - package: PushFire
         product: PushFire
