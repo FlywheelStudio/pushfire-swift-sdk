@@ -118,3 +118,153 @@ private func makeClient(_ transport: FakeTransport) -> APIClient {
 
     #expect(result.id == "dev_9")
 }
+
+@Test func undecodableSuccessBodyThrowsAPIErrorCarryingTheRawBody() async throws {
+    // A 2xx whose body does not match the expected type must surface as a PushFireError
+    // carrying the server's actual response — a bare DecodingError escaping here would
+    // break the documented "every throwing call throws PushFireError" contract and give
+    // the caller nothing to debug with.
+    let transport = FakeTransport(response: .ok(#"{"id":{"nested":true}}"#))
+
+    struct Result: Decodable { let id: String }
+
+    do {
+        let _: Result = try await makeClient(transport)
+            .send(.registerDevice, body: Payload(name: "x"))
+        Issue.record("expected a throw")
+    } catch PushFireError.api(let message, let code, let statusCode, let responseBody) {
+        #expect(message == "Could not decode the response")
+        #expect(code == nil)
+        // The request itself succeeded, so there is no failing status to report.
+        #expect(statusCode == nil)
+        #expect(responseBody == #"{"id":{"nested":true}}"#)
+    }
+}
+
+@Test func emptySuccessBodyDecodesAsAnEmptyObject() async throws {
+    // A 204-style empty body is substituted with `{}` so a response type whose fields
+    // are all optional still decodes rather than failing.
+    let transport = FakeTransport(response: .ok(""))
+
+    struct Result: Decodable { let id: String? }
+    let result: Result = try await makeClient(transport)
+        .send(.registerDevice, body: Payload(name: "x"))
+
+    #expect(result.id == nil)
+}
+
+// MARK: - Error-shape precedence
+//
+// `decodeError` is exercised directly here: the shapes below are about what the
+// function extracts from a body, not about the request that produced it.
+
+@Test func errorFallsBackToRawBodyForJSONWithoutAKnownErrorField() {
+    // A JSON object the SDK does not recognise still has to hand the caller the
+    // server's own words rather than a generic "request failed" string.
+    let body = Data(#"{"detail":"tenant suspended","code":"E_TENANT"}"#.utf8)
+
+    let error = APIClient.decodeError(statusCode: 403, body: body)
+
+    guard case PushFireError.api(let message, let code, let statusCode, _) = error else {
+        Issue.record("expected an api error")
+        return
+    }
+    #expect(message == #"{"detail":"tenant suspended","code":"E_TENANT"}"#)
+    // `code` is read independently of the message, so it survives the fallback.
+    #expect(code == "E_TENANT")
+    #expect(statusCode == 403)
+}
+
+@Test func errorIgnoresAnEmptyValidationErrorsArray() {
+    // `errors: []` carries no message, so the chain must fall through to the raw body
+    // instead of reporting an empty string.
+    let error = APIClient.decodeError(statusCode: 422, body: Data(#"{"errors":[]}"#.utf8))
+
+    guard case PushFireError.api(let message, _, _, _) = error else {
+        Issue.record("expected an api error")
+        return
+    }
+    #expect(message == #"{"errors":[]}"#)
+}
+
+@Test func errorIgnoresValidationEntriesWithoutMessages() {
+    let body = Data(#"{"errors":[{"path":"data.phone"}]}"#.utf8)
+
+    let error = APIClient.decodeError(statusCode: 422, body: body)
+
+    guard case PushFireError.api(let message, _, _, _) = error else {
+        Issue.record("expected an api error")
+        return
+    }
+    #expect(message == #"{"errors":[{"path":"data.phone"}]}"#)
+}
+
+@Test func errorMessageWinsOverBothErrorAndValidationArray() {
+    // The precedence chain mirrors the Dart client and must not regress.
+    let body = Data(
+        #"{"message":"top","error":"middle","errors":[{"message":"bottom"}]}"#.utf8
+    )
+
+    let error = APIClient.decodeError(statusCode: 400, body: body)
+
+    guard case PushFireError.api(let message, _, _, _) = error else {
+        Issue.record("expected an api error")
+        return
+    }
+    #expect(message == "top")
+}
+
+@Test func errorFieldWinsOverTheValidationArray() {
+    let body = Data(#"{"error":"middle","errors":[{"message":"bottom"}]}"#.utf8)
+
+    let error = APIClient.decodeError(statusCode: 400, body: body)
+
+    guard case PushFireError.api(let message, _, _, _) = error else {
+        Issue.record("expected an api error")
+        return
+    }
+    #expect(message == "middle")
+}
+
+@Test func errorFallsBackToStatusForABodyThatIsNotUTF8() {
+    // A proxy or a misconfigured gateway can return bytes that are not UTF-8 at all.
+    // There is nothing quotable in them, so the caller gets the status message rather
+    // than an empty error.
+    let error = APIClient.decodeError(statusCode: 502, body: Data([0xFF, 0xFE, 0xFD]))
+
+    guard case PushFireError.api(let message, _, let statusCode, let responseBody) = error else {
+        Issue.record("expected an api error")
+        return
+    }
+    #expect(message == "API request failed with status 502")
+    #expect(statusCode == 502)
+    #expect(responseBody == nil)
+}
+
+@Test func errorFallsBackToStatusForParseableJSONThatIsNotUTF8() throws {
+    // JSONSerialization also accepts UTF-16, so a body can parse as JSON while still
+    // having no UTF-8 text to quote. The raw-body fallback must cope with that instead
+    // of reporting an empty message.
+    let body = try #require(#"{"detail":"suspended"}"#.data(using: .utf16))
+
+    let error = APIClient.decodeError(statusCode: 403, body: body)
+
+    guard case PushFireError.api(let message, _, _, let responseBody) = error else {
+        Issue.record("expected an api error")
+        return
+    }
+    #expect(message == "API request failed with status 403")
+    #expect(responseBody == nil)
+}
+
+@Test func errorFallsBackToStatusForAWhitespaceOnlyBody() {
+    let error = APIClient.decodeError(statusCode: 500, body: Data("   \n".utf8))
+
+    guard case PushFireError.api(let message, _, _, let responseBody) = error else {
+        Issue.record("expected an api error")
+        return
+    }
+    #expect(message == "API request failed with status 500")
+    // The untrimmed body is still handed back for diagnostics.
+    #expect(responseBody == "   \n")
+}

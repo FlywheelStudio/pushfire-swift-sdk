@@ -26,6 +26,36 @@ import Testing
     #expect(store.string(forKey: StorageKey.deviceId) == "dev_1")
 }
 
+@Test func storeFallsBackToStandardDefaultsWithoutASuiteName() {
+    // `userDefaultsSuiteName` is optional in the configuration, so the common case is
+    // no suite at all — the store still has to read and write somewhere real.
+    let key = "pushfire.tests.\(UUID().uuidString)"
+    let store = UserDefaultsStore(suiteName: nil)
+    defer { UserDefaults.standard.removeObject(forKey: key) }
+
+    store.setString("dev_1", forKey: key)
+
+    #expect(store.string(forKey: key) == "dev_1")
+    #expect(UserDefaults.standard.string(forKey: key) == "dev_1")
+}
+
+@Test func storeFallsBackToStandardDefaultsWhenTheSuiteCannotBeOpened() throws {
+    // `UserDefaults(suiteName:)` returns nil for the global domain. A misconfigured app
+    // group must degrade to standard defaults rather than leaving the SDK with no
+    // storage at all.
+    let unopenable = UserDefaults.globalDomain
+    try #require(UserDefaults(suiteName: unopenable) == nil)
+
+    let key = "pushfire.tests.\(UUID().uuidString)"
+    let store = UserDefaultsStore(suiteName: unopenable)
+    defer { UserDefaults.standard.removeObject(forKey: key) }
+
+    store.setString("dev_1", forKey: key)
+
+    #expect(store.string(forKey: key) == "dev_1")
+    #expect(UserDefaults.standard.string(forKey: key) == "dev_1")
+}
+
 // MARK: - Migration from the Flutter SDK
 //
 // `shared_preferences` writes every key with a hardcoded `flutter.` prefix, so an
