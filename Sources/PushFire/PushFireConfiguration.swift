@@ -60,3 +60,42 @@ public struct PushFireConfiguration: Sendable {
         }
     }
 }
+
+// The API key must never be printable. Without these conformances the synthesized
+// output of `print`, `String(describing:)`, `String(reflecting:)` and `dump` includes
+// `apiKey` in full, and configurations get logged during integration debugging. The
+// Flutter SDK omits it from `toString()` for the same reason.
+//
+// All four printing paths resolve differently — `dump` goes through `Mirror`, not
+// through either string conversion — so all three conformances are needed.
+extension PushFireConfiguration: CustomStringConvertible, CustomDebugStringConvertible,
+    CustomReflectable
+{
+    public var description: String {
+        """
+        PushFireConfiguration(baseURL: \(baseURL.absoluteString), \
+        enableLogging: \(enableLogging), timeout: \(timeout), \
+        requestNotificationPermission: \(requestNotificationPermission), \
+        registerWithoutPrompt: \(registerWithoutPrompt), \
+        userDefaultsSuiteName: \(userDefaultsSuiteName ?? "nil"))
+        """
+    }
+
+    public var debugDescription: String { description }
+
+    public var customMirror: Mirror {
+        Mirror(
+            self,
+            children: [
+                "apiKey": "<redacted>",
+                "baseURL": baseURL,
+                "enableLogging": enableLogging,
+                "timeout": timeout,
+                "requestNotificationPermission": requestNotificationPermission,
+                "registerWithoutPrompt": registerWithoutPrompt,
+                "userDefaultsSuiteName": userDefaultsSuiteName as Any,
+            ],
+            displayStyle: .struct
+        )
+    }
+}
