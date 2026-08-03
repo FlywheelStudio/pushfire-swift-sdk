@@ -163,3 +163,31 @@ private func makeTagService(
     #expect(result.succeeded.map(\.tagId) == ["plan", "tier"])
     #expect(result.failed.isEmpty)
 }
+
+@Test func bulkAddWithEmptyArrayMakesNoRequest() async throws {
+    let transport = FakeTransport(responses: [])
+    let service = makeTagService(transport: transport)
+
+    let result = try await service.addTags([])
+
+    #expect(result.succeeded.isEmpty)
+    #expect(result.failed.isEmpty)
+    #expect(result.isCompleteSuccess == true)
+
+    let recorded = await transport.recorded
+    #expect(recorded.isEmpty)
+}
+
+@Test func bulkRemoveWithEmptyArrayMakesNoRequest() async throws {
+    let transport = FakeTransport(responses: [])
+    let service = makeTagService(transport: transport)
+
+    let result = try await service.removeTags([])
+
+    #expect(result.succeeded.isEmpty)
+    #expect(result.failed.isEmpty)
+    #expect(result.isCompleteSuccess == true)
+
+    let recorded = await transport.recorded
+    #expect(recorded.isEmpty)
+}

@@ -47,6 +47,24 @@ The SDK uses Firebase Cloud Messaging for push delivery, so a Firebase project i
 integration mistake — if you skip it, Firebase Messaging has no project to talk to and device
 registration will fail silently or crash, depending on what else touches Firebase first.
 
+**The SDK also depends on `Messaging.messaging().apnsToken` being set**, which Firebase
+normally populates automatically through its app-delegate method swizzling. If your app
+disables that swizzling — setting `FirebaseAppDelegateProxyEnabled` to `NO` in Info.plist,
+which is routine when the app has its own `UNUserNotificationCenterDelegate` or ships another
+push SDK — you must forward the APNs token to Firebase yourself:
+
+```swift
+func application(
+    _ application: UIApplication,
+    didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+) {
+    Messaging.messaging().apnsToken = deviceToken
+}
+```
+
+Without it the SDK never obtains a token, never registers, and reports no error —
+`configure()` still succeeds.
+
 ## Xcode capabilities
 
 In your target's Signing & Capabilities tab, add:
@@ -84,6 +102,10 @@ try await PushFire.configure(
 )
 ```
 
+`enableLogging` is meant for development. It writes subscriber external ids, subscriber ids,
+and device ids to the unified system log at `os.Logger`'s `.public` privacy level (request and
+response bodies are logged at `.private`). Leave it off in release builds.
+
 `PushFire.shared` throws `PushFireError.notInitialized` until `configure` completes, so
 calls read `try await PushFire.shared.login(...)`. A single `try` covers both the
 accessor and the call.
@@ -116,6 +138,31 @@ Do not start an event observer (or any other `shared`-touching work) in a second
 task alongside `configure`. That races the configuration call: if the observer's task runs
 first, `try? PushFire.shared` fails, and the observer gives up silently with no error and no
 retry.
+
+## Configuration
+
+`PushFireConfiguration` has seven properties. Only `apiKey` is required.
+
+| Property | Type | Default | Description |
+| --- | --- | --- | --- |
+| `apiKey` | `String` | required | Project API key. Sent as `Authorization: Bearer <apiKey>`. |
+| `baseURL` | `URL` | `https://api.pushfire.app/functions/v1/` | Base URL for the PushFire API. The trailing slash is significant. |
+| `enableLogging` | `Bool` | `false` | Emit SDK logs through `os.Logger`. See the logging note above. |
+| `timeout` | `TimeInterval` | `30` | Request timeout in seconds. |
+| `requestNotificationPermission` | `Bool` | `true` | Request the notification permission during `configure`. |
+| `registerWithoutPrompt` | `Bool` | `false` | See below. |
+| `userDefaultsSuiteName` | `String?` | `nil` | `UserDefaults` suite for SDK state. Pass an app-group suite to share state with a Notification Service Extension. |
+
+**`registerWithoutPrompt`** only has an effect when `requestNotificationPermission` is
+`false`. When both are set that way, the SDK still triggers remote-notification
+registration so an APNs token — and therefore an FCM token — can be obtained without
+showing the interruptive permission dialog. It does this by requesting *provisional*
+authorization: the OS registers for remote notifications and delivers notifications
+quietly to Notification Center, without a prompt. Provisional authorization is not the
+same as no authorization — it is a user-visible behavior change, since the user can later
+be asked whether to keep or turn off notifications. For registration with no authorization
+at all, call `UIApplication.shared.registerForRemoteNotifications()` yourself and leave
+`registerWithoutPrompt` false.
 
 ## API reference
 
@@ -335,6 +382,23 @@ To integrate a different auth system, implement the `AuthProvider` protocol your
 a single `events: AsyncStream<AuthEvent>` requirement, where `AuthEvent` is `.signedIn(AuthUser)`
 or `.signedOut`.
 
+### Custom push token provider
+
+`PushFire.configure` also takes an optional `pushTokenProvider:` parameter. The SDK ships a
+FirebaseMessaging-backed implementation by default; pass your own to replace it:
+
+```swift
+try await PushFire.configure(
+    PushFireConfiguration(apiKey: "your-api-key"),
+    pushTokenProvider: MyPushTokenProvider()
+)
+```
+
+`PushTokenProvider` is a public protocol with three requirements: `apnsToken() async -> String?`,
+`fcmToken() async -> String?`, and `tokenRefreshes: AsyncStream<String>`. This is the
+equivalent of the Flutter SDK's `getFcmTokenOverride` escape hatch, for apps that need custom
+token acquisition instead of the default Firebase-backed one.
+
 ## Error handling
 
 Every throwing SDK call throws `PushFireError`:
@@ -369,6 +433,24 @@ do {
     print("PushFire error: \(error)")
 }
 ```
+
+## Data storage
+
+The SDK persists its state in `UserDefaults` — `UserDefaults.standard`, or the suite named
+by `PushFireConfiguration.userDefaultsSuiteName` — under these keys:
+
+- `pushfire_subscriber_data` — the full logged-in subscriber, as JSON: `name`, `email`,
+  `phone`, and any caller-supplied `metadata`.
+- `pushfire_device_id` — the registered PushFire device id.
+- `pushfire_fcm_token` — the current FCM token.
+- `pushfire_subscriber_id` — the logged-in subscriber's PushFire id.
+- `pushfire_last_permission_status` — the last-observed OS notification permission.
+- `pushfire_notification_preference` — the PushFire notification preference.
+
+`UserDefaults` storage is an unencrypted plist inside the app container. It is readable on
+a jailbroken device and is included in unencrypted device backups. Setting
+`userDefaultsSuiteName` widens that exposure to every extension in the app group. Weigh
+this before putting sensitive values in `metadata`.
 
 ## Differences from the Flutter SDK
 

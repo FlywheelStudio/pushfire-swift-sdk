@@ -90,12 +90,22 @@ try await PushFire.configure(
 )
 ```
 
+With a custom push token provider, replacing the default FirebaseMessaging-backed one
+(equivalent to the Flutter SDK's `getFcmTokenOverride`):
+
+```swift
+try await PushFire.configure(
+    PushFireConfiguration(apiKey: "your-api-key"),
+    pushTokenProvider: MyPushTokenProvider()
+)
+```
+
 ## Types
 
 ```swift
 public final class PushFire: Sendable {
     public static let sdkVersion: String  // "0.1.0"
-    public static func configure(_ configuration: PushFireConfiguration, authProvider: (any AuthProvider)? = nil) async throws
+    public static func configure(_ configuration: PushFireConfiguration, authProvider: (any AuthProvider)? = nil, pushTokenProvider: (any PushTokenProvider)? = nil) async throws
     public static var shared: PushFire { get throws }  // throws .notInitialized until configured
     public static var isConfigured: Bool { get }
     public static func shutdown() async
@@ -115,6 +125,12 @@ public struct PushFireConfiguration: Sendable {
 
 public protocol AuthProvider: Sendable {
     var events: AsyncStream<AuthEvent> { get }
+}
+
+public protocol PushTokenProvider: Sendable {
+    func apnsToken() async -> String?  // nil if Apple has not delivered it yet
+    func fcmToken() async -> String?  // nil if not available yet
+    var tokenRefreshes: AsyncStream<String> { get }  // emits whenever the FCM token rotates
 }
 
 public enum AuthEvent: Sendable, Equatable {
@@ -220,6 +236,7 @@ public enum WorkflowRunTarget: Sendable, Equatable {
 public struct WorkflowExecutionResponse: Codable, Sendable, Equatable {
     public let id: String?
     public let message: String?
+    public init(id: String?, message: String?)
 }
 
 public enum PushFireEvent: Sendable, Equatable {

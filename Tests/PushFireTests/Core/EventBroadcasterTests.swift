@@ -3,7 +3,8 @@ import Testing
 
 @testable import PushFire
 
-@Test func deliversToEveryConsumer() async throws {
+@Test(.timeLimit(.minutes(1)))
+func deliversToEveryConsumer() async throws {
     let broadcaster = EventBroadcaster()
     let first = await broadcaster.stream()
     let second = await broadcaster.stream()
@@ -20,7 +21,8 @@ import Testing
     #expect(b == .subscriberLoggedOut)
 }
 
-@Test func deliversEventsInOrder() async throws {
+@Test(.timeLimit(.minutes(1)))
+func deliversEventsInOrder() async throws {
     let broadcaster = EventBroadcaster()
     let stream = await broadcaster.stream()
 

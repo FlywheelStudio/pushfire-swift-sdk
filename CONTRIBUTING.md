@@ -27,19 +27,23 @@ A clean run produces no output. Fix any reported violations before opening a pul
 Build the core library:
 
 ```bash
-xcodebuild build -scheme PushFire -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.3.1'
+xcodebuild build -scheme PushFire -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
 Run the full test suite:
 
 ```bash
-xcodebuild test -scheme PushFire-Package -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.3.1'
+xcodebuild test -scheme PushFire-Package -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
 Use `PushFire-Package`, not `PushFire`, to run tests. The per-product `PushFire` scheme is
 library-only and has no test action — `xcodebuild test` against it fails immediately.
 `PushFire-Package` is the scheme that runs every test bundle (`PushFireTests` and
 `PushFireSupabaseAuthTests`).
+
+The destination's device name depends on what simulators are installed on your machine.
+Substitute whichever iPhone simulator you have; run `xcrun simctl list devices available`
+to see them.
 
 ## Example app
 

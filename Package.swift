@@ -44,7 +44,11 @@ let package = Package(
         ),
         .testTarget(
             name: "PushFireSupabaseAuthTests",
-            dependencies: ["PushFireSupabaseAuth"],
+            dependencies: [
+                "PushFireSupabaseAuth",
+                "PushFire",
+                .product(name: "Supabase", package: "supabase-swift"),
+            ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
