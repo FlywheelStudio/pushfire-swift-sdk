@@ -59,6 +59,12 @@ public struct WorkflowExecutionRequest: Encodable, Sendable, Equatable {
         try container.encode(target, forKey: .target)
         if let scheduledFor {
             let formatter = ISO8601DateFormatter()
+            // A default `ISO8601DateFormatter` uses `.withInternetDateTime`, which has no
+            // fractional-seconds field and therefore truncates: a Date of 10:30:00.900
+            // would ship as 10:30:00Z, scheduling the workflow up to 999 ms early. Dart's
+            // `toIso8601String()` always emits milliseconds, so this also keeps the two
+            // SDKs sending byte-identical values for the same instant.
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             try container.encode(formatter.string(from: scheduledFor), forKey: .scheduledFor)
         }
     }
@@ -90,12 +96,40 @@ public struct WorkflowExecutionRequest: Encodable, Sendable, Equatable {
 }
 
 /// The server's response to a workflow execution request.
-public struct WorkflowExecutionResponse: Codable, Sendable, Equatable {
+///
+/// `Decodable` only, mirroring `WorkflowExecutionRequest` being `Encodable` only:
+/// nothing sends this type, and the custom decoding below has no meaningful inverse.
+public struct WorkflowExecutionResponse: Decodable, Sendable, Equatable {
     public let id: String?
     public let message: String?
 
     public init(id: String?, message: String?) {
         self.id = id
         self.message = message
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, message, data
+    }
+
+    private struct Nested: Decodable {
+        let id: String?
+        let message: String?
+    }
+
+    /// Probes the top level and then a nested `data` object.
+    ///
+    /// The backend is inconsistent about where it puts the id — the same reason
+    /// `IdentifierResponse` probes several shapes. Both fields here are optional, so
+    /// without this a `{"data": {"id": "..."}}` response would decode successfully to
+    /// `(nil, nil)` and lose the execution id with no error and no log.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Lenient: a `data` value that is not an object (a string, say) leaves the
+        // top-level fields usable rather than failing the whole decode.
+        let nested = (try? container.decodeIfPresent(Nested.self, forKey: .data)) ?? nil
+        self.id = try container.decodeIfPresent(String.self, forKey: .id) ?? nested?.id
+        self.message =
+            try container.decodeIfPresent(String.self, forKey: .message) ?? nested?.message
     }
 }
