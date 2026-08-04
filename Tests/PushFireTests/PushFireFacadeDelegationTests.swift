@@ -86,6 +86,27 @@ extension PushFireFacadeTests {
             }
         }
 
+        // MARK: - Configuration
+
+        @Test func exposesTheConfigurationItWasBuiltWith() async throws {
+            await PushFire.shutdown()
+            let (sdk, _) = try await install([], store: registeredStore())
+
+            // The Flutter SDK exposes the same thing as `PushFireSDK.instance.config`;
+            // without it there is no way to read back a resolved baseURL or timeout
+            // when diagnosing an integration.
+            #expect(sdk.configuration.apiKey == "k")
+            #expect(sdk.configuration.requestNotificationPermission == false)
+            #expect(
+                sdk.configuration.baseURL.absoluteString
+                    == "https://api.pushfire.app/functions/v1/"
+            )
+        }
+
+        // The accessor hands back the same `PushFireConfiguration` value, so the
+        // redaction of `apiKey` across all four printing paths is already covered by
+        // `configurationNeverPrintsTheAPIKey` and does not need repeating here.
+
         // MARK: - Subscribers
 
         @Test func loginPostsEveryFieldAndEmitsLoggedIn() async throws {

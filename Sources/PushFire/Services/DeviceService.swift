@@ -7,8 +7,8 @@ import Foundation
 /// as-is because it works and there's no value in churning it: a minimal type exposing
 /// only the `.milliseconds(_:)` factory the poll loop needs, so call sites read the
 /// same as they would with `Duration`.
-struct PollInterval: Sendable {
-    fileprivate let nanoseconds: UInt64
+struct PollInterval: Sendable, Equatable {
+    let nanoseconds: UInt64
 
     static func milliseconds(_ value: Int) -> PollInterval {
         PollInterval(nanoseconds: UInt64(value) * 1_000_000)
@@ -33,6 +33,19 @@ actor DeviceService {
     private let logger: PushFireLogger
     private let apnsPollInterval: PollInterval
     private let apnsPollAttempts: Int
+    /// How the poll loop waits between checks. Injectable only so a test can count the
+    /// gaps: the number of sleeps is what makes the window 5.0s rather than 5.5s, and it
+    /// is not observable from the number of token checks.
+    private let sleeper: @Sendable (PollInterval) async -> Void
+
+    /// How long a late APNs token has to arrive, matched to the Flutter SDK.
+    ///
+    /// Flutter checks once, then retries up to 10 times with a 500ms delay before each
+    /// retry — 11 checks, and 10 gaps totalling 5.0 seconds. Counting only the retries
+    /// here would give a device on a slow network half a second less grace on iOS than
+    /// the same device gets through the Flutter SDK.
+    static let defaultAPNSPollInterval = PollInterval.milliseconds(500)
+    static let defaultAPNSPollAttempts = 11
     /// The in-flight registration. Concurrent callers await this one rather than
     /// starting a second registration — the Swift equivalent of
     /// `PushFireCore.permissionCheck`, applied to `registerDevice()`. Without this,
@@ -48,8 +61,11 @@ actor DeviceService {
         permissions: any NotificationPermissionProvider,
         tokens: any PushTokenProvider,
         logger: PushFireLogger,
-        apnsPollInterval: PollInterval = .milliseconds(500),
-        apnsPollAttempts: Int = 10
+        apnsPollInterval: PollInterval = DeviceService.defaultAPNSPollInterval,
+        apnsPollAttempts: Int = DeviceService.defaultAPNSPollAttempts,
+        sleeper: @escaping @Sendable (PollInterval) async -> Void = {
+            try? await Task.sleep(nanoseconds: $0.nanoseconds)
+        }
     ) {
         self.apiClient = apiClient
         self.config = config
@@ -60,6 +76,7 @@ actor DeviceService {
         self.logger = logger
         self.apnsPollInterval = apnsPollInterval
         self.apnsPollAttempts = apnsPollAttempts
+        self.sleeper = sleeper
     }
 
     /// Registers the device, or updates it if something changed.
@@ -354,8 +371,11 @@ actor DeviceService {
             if let token = await tokens.apnsToken() {
                 return token
             }
+            // No sleep after the last check: N checks must span N-1 gaps, or the window
+            // silently grows past the 5.0s the Flutter SDK allows. The check count alone
+            // does not reveal that, which is why `sleeper` is injectable.
             if attempt < apnsPollAttempts - 1 {
-                try? await Task.sleep(nanoseconds: apnsPollInterval.nanoseconds)
+                await sleeper(apnsPollInterval)
             }
         }
         return nil

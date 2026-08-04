@@ -1,7 +1,7 @@
 import Foundation
 
 /// The current notification state for this device.
-public struct NotificationStatus: Sendable, Equatable {
+public struct NotificationStatus: Sendable, Hashable {
     /// Whether the OS-level notification permission is granted.
     public let isPermissionGranted: Bool
 

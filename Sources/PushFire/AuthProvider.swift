@@ -1,7 +1,7 @@
 import Foundation
 
 /// A user from your authentication system.
-public struct AuthUser: Sendable, Equatable {
+public struct AuthUser: Sendable, Hashable {
     public let id: String
     public let name: String?
     public let email: String?
@@ -18,7 +18,7 @@ public struct AuthUser: Sendable, Equatable {
 }
 
 /// A change in authentication state.
-public enum AuthEvent: Sendable, Equatable {
+public enum AuthEvent: Sendable, Hashable {
     case signedIn(AuthUser)
     case signedOut
 }

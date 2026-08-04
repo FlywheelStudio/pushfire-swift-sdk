@@ -4,9 +4,9 @@ import Foundation
 ///
 /// Unlike the Flutter SDK, which logs failures and returns only the successes, this
 /// reports both sides so a caller can react to a partial failure.
-public struct BulkTagResult: Sendable, Equatable {
+public struct BulkTagResult: Sendable, Hashable {
     /// A tag operation that did not succeed.
-    public struct Failure: Sendable, Equatable {
+    public struct Failure: Sendable, Hashable {
         public let tagId: String
         public let message: String
     }
