@@ -1,7 +1,7 @@
 import Foundation
 
 /// A JSON value, used for subscriber metadata where the schema is caller-defined.
-public enum JSONValue: Codable, Sendable, Equatable {
+public enum JSONValue: Codable, Sendable, Hashable {
     case string(String)
     case int(Int)
     case double(Double)
@@ -49,7 +49,7 @@ public enum JSONValue: Codable, Sendable, Equatable {
 }
 
 /// A subscriber in the PushFire system.
-public struct Subscriber: Codable, Sendable, Equatable {
+public struct Subscriber: Codable, Sendable, Hashable {
     public let id: String?
     public let deviceId: String?
     public let externalId: String

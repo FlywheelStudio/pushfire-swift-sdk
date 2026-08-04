@@ -1,7 +1,7 @@
 import Foundation
 
 /// A device registered with PushFire.
-public struct Device: Codable, Sendable, Equatable {
+public struct Device: Codable, Sendable, Hashable {
     public let id: String?
     public let fcmToken: String
     public let os: String

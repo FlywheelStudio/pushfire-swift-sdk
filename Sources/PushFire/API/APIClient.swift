@@ -41,7 +41,9 @@ actor APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = endpoint.method
         request.timeoutInterval = config.timeout
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // The charset is explicit because the Dart SDK's http client appends it for a
+        // String body, and the two SDKs must put the same bytes on the wire.
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
         do {
@@ -66,7 +68,10 @@ actor APIClient {
             throw error
         } catch {
             logger.error("Network error during \(endpoint.method) \(endpoint.path)", error)
-            throw PushFireError.network(error.localizedDescription)
+            throw PushFireError.network(
+                error.localizedDescription,
+                underlying: UnderlyingError(error)
+            )
         }
 
         logger.apiResponse(

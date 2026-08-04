@@ -34,7 +34,7 @@ actor PushFireCore {
         lifecycle: any AppLifecycleObserver,
         authProvider: (any AuthProvider)?,
         apnsPollInterval: PollInterval = .milliseconds(500),
-        apnsPollAttempts: Int = 10
+        apnsPollAttempts: Int = 11
     ) {
         let logger = PushFireLogger(enabled: config.enableLogging)
         let apiClient = APIClient(config: config, transport: transport, logger: logger)

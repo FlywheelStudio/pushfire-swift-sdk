@@ -119,8 +119,15 @@ final class FakeTokenProvider: PushTokenProvider, @unchecked Sendable {
         lock.withLock { apns = token }
     }
 
+    /// How many times the APNs token has been asked for. Lets a test pin the poll
+    /// window, which has to match the Flutter SDK's.
+    private(set) var apnsCallCount = 0
+
     func apnsToken() async -> String? {
-        lock.withLock { apns }
+        lock.withLock {
+            apnsCallCount += 1
+            return apns
+        }
     }
 
     func fcmToken() async -> String? {

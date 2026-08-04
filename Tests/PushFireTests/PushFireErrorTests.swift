@@ -25,6 +25,32 @@ import Testing
     #expect(PushFireError.network("offline").description == "PushFire network error: offline")
 }
 
+@Test func networkErrorDescriptionNamesTheSystemErrorWhenPresent() {
+    let offline = NSError(
+        domain: NSURLErrorDomain,
+        code: NSURLErrorNotConnectedToInternet,
+        userInfo: [NSLocalizedDescriptionKey: "The Internet connection appears to be offline."]
+    )
+    let error = PushFireError.network("offline", underlying: UnderlyingError(offline))
+
+    #expect(
+        error.description
+            == "PushFire network error: offline (\(NSURLErrorDomain) \(NSURLErrorNotConnectedToInternet))"
+    )
+}
+
+@Test func underlyingErrorCapturesTheDomainAndCodeToBranchOn() {
+    // The point of the type: distinguishing offline from timeout without matching on
+    // a localized, user-facing string.
+    let timeout = URLError(.timedOut)
+    let captured = UnderlyingError(timeout)
+
+    #expect(captured.domain == NSURLErrorDomain)
+    #expect(captured.code == NSURLErrorTimedOut)
+    #expect(!captured.message.isEmpty)
+    #expect(captured.description.contains("\(NSURLErrorTimedOut)"))
+}
+
 @Test func apiErrorDescriptionIncludesCodeAndStatusWhenPresent() {
     let full = PushFireError.api(
         message: "Bad thing",

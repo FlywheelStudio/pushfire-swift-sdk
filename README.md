@@ -502,6 +502,20 @@ the places the behavior diverges:
    Swift SDK splits `PushFireFirebaseAuth` and `PushFireSupabaseAuth` into separate SPM
    products from the core `PushFire` library, so a consumer using neither downloads neither
    dependency.
+9. **A 2xx response whose body is not JSON is an error, not a success.** The Flutter client
+   catches the decode failure and returns `{'success': true, 'raw_response': <body>}`, so a
+   caller cannot tell a real result from an HTML gateway page that happened to arrive with a
+   200. The Swift SDK throws `PushFireError.api` with the raw body attached in
+   `responseBody`. This is the one place the SDKs deliberately disagree rather than
+   converging: a response the SDK could not understand is not a result, and silently
+   reporting success for one is how a broken deployment stays invisible. Endpoints that
+   discard their response body are unaffected on both sides.
+10. **Transport failures carry the system error's domain and code.** `PushFireError.network`
+    has an `underlying: UnderlyingError?` holding `domain`, `code`, and `message`, so you can
+    branch on `NSURLErrorNotConnectedToInternet` versus `NSURLErrorTimedOut` without matching
+    a localized string. It is a snapshot rather than the error object because `any Error` is
+    not `Sendable` and `PushFireError` crosses actor boundaries. The Flutter SDK keeps the
+    original object in `originalError`; the Swift equivalent keeps what you can act on.
 
 ## License
 

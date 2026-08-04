@@ -105,6 +105,12 @@ cd Example && xcodegen generate
 Set `PUSHFIRE_API_KEY` in the scheme's environment variables (or export it before building)
 to test against a real project.
 
+The example covers every public entry point, one button each, and reports what each call
+returned or how it failed. That is deliberate — it is the manual test rig for behavior the
+unit tests cannot reach (a real APNs token, a real permission prompt, a real settings
+round trip), and it is where an integrator looks to see how a call is meant to be used. When
+you add a public API, add it here too.
+
 ## Scope
 
 Keep pull requests focused on one change. Do not bundle unrelated refactors, dependency

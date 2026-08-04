@@ -7,6 +7,57 @@ private struct Payload: Encodable {
     let name: String
 }
 
+/// Transport that fails the way `URLSession` does when the device is offline.
+private struct ThrowingTransport: HTTPTransport {
+    let error: any Error
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        throw error
+    }
+}
+
+@Test func networkFailuresCarryTheSystemErrorForBranching() async throws {
+    let client = APIClient(
+        config: PushFireConfiguration(apiKey: "k"),
+        transport: ThrowingTransport(error: URLError(.notConnectedToInternet)),
+        logger: PushFireLogger(enabled: false)
+    )
+
+    do {
+        try await client.send(.registerDevice, body: Payload(name: "Jane"))
+        Issue.record("expected the transport failure to surface")
+    } catch let error as PushFireError {
+        guard case .network(_, let underlying) = error else {
+            Issue.record("expected .network, got \(error)")
+            return
+        }
+        // Without this a caller has to string-match a localized message to tell
+        // "no connection" from "timed out" and decide whether to queue or retry.
+        #expect(underlying?.domain == NSURLErrorDomain)
+        #expect(underlying?.code == NSURLErrorNotConnectedToInternet)
+    }
+}
+
+@Test func timeoutsAreDistinguishableFromBeingOffline() async throws {
+    let client = APIClient(
+        config: PushFireConfiguration(apiKey: "k"),
+        transport: ThrowingTransport(error: URLError(.timedOut)),
+        logger: PushFireLogger(enabled: false)
+    )
+
+    do {
+        try await client.send(.registerDevice, body: Payload(name: "Jane"))
+        Issue.record("expected the transport failure to surface")
+    } catch let error as PushFireError {
+        guard case .network(_, let underlying) = error else {
+            Issue.record("expected .network, got \(error)")
+            return
+        }
+        #expect(underlying?.code == NSURLErrorTimedOut)
+        #expect(underlying?.code != NSURLErrorNotConnectedToInternet)
+    }
+}
+
 private func makeClient(_ transport: FakeTransport) -> APIClient {
     APIClient(
         config: PushFireConfiguration(apiKey: "test-key"),
@@ -28,7 +79,11 @@ private func makeClient(_ transport: FakeTransport) -> APIClient {
             == "https://api.pushfire.app/functions/v1/register-device"
     )
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-key")
-    #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+    // Charset included: the Dart SDK's http client appends it for a String body, and
+    // both SDKs must put the same bytes on the wire.
+    #expect(
+        request.value(forHTTPHeaderField: "Content-Type") == "application/json; charset=utf-8"
+    )
 
     let data = try await transport.requestData(at: 0)
     #expect(data["name"] as? String == "Jane")
