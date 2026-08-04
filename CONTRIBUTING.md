@@ -17,7 +17,7 @@ The project is formatted with `swift-format`, configured in `.swift-format` (100
 lines, 4-space indentation). Before committing:
 
 ```bash
-xcrun swift-format lint --recursive --strict Sources Tests
+xcrun swift-format lint --recursive --strict Sources Tests Example/PushFireExample
 ```
 
 A clean run produces no output. Fix any reported violations before opening a pull request.
@@ -104,6 +104,15 @@ cd Example && xcodegen generate
 
 Set `PUSHFIRE_API_KEY` in the scheme's environment variables (or export it before building)
 to test against a real project.
+
+The example reaches every public call on the facade — most behind a button, the read-only
+ones as rows refreshed after each action — and reports what each call returned or how it
+failed. The `authProvider:`/`pushTokenProvider:` parameters of `configure` are out of
+scope: the example links only the `PushFire` product, so neither auth product is in the
+binary. That is deliberate — it is the manual test rig for behavior the
+unit tests cannot reach (a real APNs token, a real permission prompt, a real settings
+round trip), and it is where an integrator looks to see how a call is meant to be used. When
+you add a public API, add it here too.
 
 ## Scope
 

@@ -28,7 +28,7 @@ public final class PushFire: Sendable {
     /// `DeviceService.registerDevice()` uses for registration. A sequential second
     /// `configure()` call sees this already set and returns the first instance without
     /// starting a second core, which also avoids a wasted device registration.
-    nonisolated(unsafe) private static var configuration: Task<PushFire, any Error>?
+    nonisolated(unsafe) private static var configureTask: Task<PushFire, any Error>?
 
     /// Configures the SDK and registers this device.
     ///
@@ -49,7 +49,7 @@ public final class PushFire: Sendable {
         try configuration.validate()
 
         let task = lock.withLock { () -> Task<PushFire, any Error> in
-            if let existing = Self.configuration {
+            if let existing = Self.configureTask {
                 return existing
             }
             let newTask = Task<PushFire, any Error> {
@@ -63,7 +63,7 @@ public final class PushFire: Sendable {
                 lock.withLock { Self.instance = pushFire }
                 return pushFire
             }
-            Self.configuration = newTask
+            Self.configureTask = newTask
             return newTask
         }
 
@@ -94,8 +94,8 @@ public final class PushFire: Sendable {
     /// reporting itself configured while its background observers are stopped.
     public static func shutdown() async {
         let existing = lock.withLock { () -> Task<PushFire, any Error>? in
-            let existing = Self.configuration
-            Self.configuration = nil
+            let existing = Self.configureTask
+            Self.configureTask = nil
             Self.instance = nil
             return existing
         }
@@ -112,7 +112,7 @@ public final class PushFire: Sendable {
     /// that configuring twice is a no-op. Call `shutdown()` explicitly to reset.
     static func configureForTesting(core: PushFireCore) async {
         let (task, isWinner) = lock.withLock { () -> (Task<PushFire, any Error>, Bool) in
-            if let existing = Self.configuration {
+            if let existing = Self.configureTask {
                 return (existing, false)
             }
             let newTask = Task<PushFire, any Error> {
@@ -121,7 +121,7 @@ public final class PushFire: Sendable {
                 lock.withLock { Self.instance = pushFire }
                 return pushFire
             }
-            Self.configuration = newTask
+            Self.configureTask = newTask
             return (newTask, true)
         }
 
@@ -132,6 +132,20 @@ public final class PushFire: Sendable {
         }
         _ = try? await task.value
     }
+
+    // MARK: - Configuration
+
+    /// The configuration this instance was built with.
+    ///
+    /// Useful for reading back the resolved `baseURL` or `timeout` when diagnosing an
+    /// integration. The Flutter SDK exposes the same thing as
+    /// `PushFireSDK.instance.config`.
+    ///
+    /// Printing this never reveals the API key — every printing path redacts it. Reading
+    /// `.apiKey` directly does return it in full, so anything linked into the same
+    /// process can read the project key off this. In-process secrets are extractable
+    /// regardless; this is a note about what the redaction does and does not buy.
+    public var configuration: PushFireConfiguration { core.config }
 
     // MARK: - Subscribers
 

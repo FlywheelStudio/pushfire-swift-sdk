@@ -13,7 +13,7 @@ jobs:
       - name: Show toolchain
         run: xcodebuild -version
       - name: Lint
-        run: xcrun swift-format lint --recursive --strict Sources Tests
+        run: xcrun swift-format lint --recursive --strict Sources Tests Example/PushFireExample
       - name: Build
         run: xcodebuild build -scheme PushFire -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
       - name: Test

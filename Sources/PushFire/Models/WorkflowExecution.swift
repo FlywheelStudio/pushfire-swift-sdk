@@ -13,7 +13,7 @@ public enum WorkflowTargetType: String, Codable, Sendable {
 }
 
 /// The target configuration for a workflow execution.
-public struct WorkflowTarget: Codable, Sendable, Equatable {
+public struct WorkflowTarget: Codable, Sendable, Hashable {
     public let type: WorkflowTargetType
     public let values: [String]
 
@@ -30,7 +30,7 @@ public struct WorkflowTarget: Codable, Sendable, Equatable {
 /// default date strategy (`.deferredToDate`, i.e. a Double) and fail on the very string
 /// this type produces. Nothing ever decodes a request — it only travels to the server — so
 /// the asymmetry is removed by dropping the direction we do not use.
-public struct WorkflowExecutionRequest: Encodable, Sendable, Equatable {
+public struct WorkflowExecutionRequest: Encodable, Sendable, Hashable {
     public let workflowId: String
     public let type: WorkflowExecutionType
     public let scheduledFor: Date?
@@ -99,7 +99,7 @@ public struct WorkflowExecutionRequest: Encodable, Sendable, Equatable {
 ///
 /// `Decodable` only, mirroring `WorkflowExecutionRequest` being `Encodable` only:
 /// nothing sends this type, and the custom decoding below has no meaningful inverse.
-public struct WorkflowExecutionResponse: Decodable, Sendable, Equatable {
+public struct WorkflowExecutionResponse: Decodable, Sendable, Hashable {
     public let id: String?
     public let message: String?
 

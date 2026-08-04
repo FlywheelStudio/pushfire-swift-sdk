@@ -1,7 +1,7 @@
 import Foundation
 
 /// Something the SDK did that an app may want to observe.
-public enum PushFireEvent: Sendable, Equatable {
+public enum PushFireEvent: Sendable, Hashable {
     /// The device was registered or updated on the server.
     case deviceRegistered(Device)
 

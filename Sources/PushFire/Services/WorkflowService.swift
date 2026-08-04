@@ -1,7 +1,7 @@
 import Foundation
 
 /// Who a workflow execution should target.
-public enum WorkflowRunTarget: Sendable, Equatable {
+public enum WorkflowRunTarget: Sendable, Hashable {
     case subscribers([String])
     case segments([String])
 

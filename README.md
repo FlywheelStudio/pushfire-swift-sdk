@@ -149,7 +149,7 @@ retry.
 | Property | Type | Default | Description |
 | --- | --- | --- | --- |
 | `apiKey` | `String` | required | Project API key. Sent as `Authorization: Bearer <apiKey>`. |
-| `baseURL` | `URL` | `https://api.pushfire.app/functions/v1/` | Base URL for the PushFire API. The trailing slash is significant. |
+| `baseURL` | `URL` | `https://api.pushfire.app/functions/v1/` | Base URL for the PushFire API. A trailing slash is optional; paths are joined with `appendingPathComponent`. |
 | `enableLogging` | `Bool` | `false` | Emit SDK logs through `os.Logger`. See the logging note above. |
 | `timeout` | `TimeInterval` | `30` | Request timeout in seconds. |
 | `requestNotificationPermission` | `Bool` | `true` | Request the notification permission during `configure`. |
@@ -303,6 +303,11 @@ await PushFire.shutdown()
 // Whether `configure` has completed.
 let configured = PushFire.isConfigured
 
+// The configuration this instance was built with. Useful for reading back the
+// resolved baseURL or timeout when diagnosing an integration. Printing it redacts
+// the API key; reading `.apiKey` directly does not.
+let baseURL = try PushFire.shared.configuration.baseURL
+
 // This SDK's version, matching the released git tag.
 let version = PushFire.sdkVersion
 ```
@@ -413,7 +418,7 @@ public enum PushFireError: Error, Sendable {
     case device(String)
     case subscriber(String)
     case tag(String)
-    case network(String)
+    case network(String, underlying: UnderlyingError?)
     case api(message: String, code: String?, statusCode: Int?, responseBody: String?)
 }
 ```
@@ -423,7 +428,18 @@ public enum PushFireError: Error, Sendable {
 - `device` — device registration or notification-preference failure.
 - `subscriber` — subscriber login, update, or logout failure.
 - `tag` — tag operation failure.
-- `network` — transport-level failure: timeout, offline, DNS.
+- `network` — transport-level failure: timeout, offline, DNS. `underlying` carries the
+  system error's `domain`, `code` and `message`, so you can tell these apart without
+  matching on a localized string:
+
+  ```swift
+  catch PushFireError.network(_, let underlying) {
+      if underlying?.code == NSURLErrorNotConnectedToInternet { queueForLater() }
+  }
+  ```
+
+  Check `domain` before branching on `code`: the pair is only meaningful for errors with
+  an `NSError` representation, which every `URLSession` failure has.
 - `api` — a non-2xx response from the PushFire API, carrying the server's message, error
   code, HTTP status, and raw response body.
 
@@ -502,6 +518,25 @@ the places the behavior diverges:
    Swift SDK splits `PushFireFirebaseAuth` and `PushFireSupabaseAuth` into separate SPM
    products from the core `PushFire` library, so a consumer using neither downloads neither
    dependency.
+9. **`createWorkflowExecution` rejects a 2xx response whose body is not JSON.** Of the nine
+   endpoints, three decode a response body and six discard it. For `register-device` and
+   `login-subscriber` both SDKs fail on an unparseable 200 — Flutter's client returns
+   `{'success': true, 'raw_response': <body>}` and its service layer then throws because no
+   id came back. `createWorkflowExecution` is the one case where they differ: Flutter returns
+   the untyped map and the app believes the workflow ran, while the Swift SDK throws
+   `PushFireError.api` with the response body in `responseBody` (when it is valid UTF-8;
+   an empty body is reported as `{}`, which is what the decoder was handed) and the real
+   HTTP status in `statusCode`. This is deliberate rather than an
+   oversight — an HTML gateway page arriving with a 200 is not a workflow execution, and
+   reporting success for one is how a broken deployment stays invisible. Porting this call
+   needs attention anyway: Swift returns a typed `WorkflowExecutionResponse` where Flutter
+   returns `Map<String, dynamic>`.
+10. **Transport failures carry the system error's domain and code.** `PushFireError.network`
+    has an `underlying: UnderlyingError?` holding `domain`, `code`, and `message`, so you can
+    branch on `NSURLErrorNotConnectedToInternet` versus `NSURLErrorTimedOut` without matching
+    a localized string. It is a snapshot rather than the error object because `any Error` is
+    not `Sendable` and `PushFireError` crosses actor boundaries. The Flutter SDK keeps the
+    original object in `originalError`; the Swift equivalent keeps what you can act on.
 
 ## License
 

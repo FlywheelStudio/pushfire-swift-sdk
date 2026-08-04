@@ -103,9 +103,17 @@ final class FakeTokenProvider: PushTokenProvider, @unchecked Sendable {
     private let continuation: AsyncStream<String>.Continuation
     let tokenRefreshes: AsyncStream<String>
 
-    init(apns: String? = "apns-token", fcm: String? = "fcm-token") {
+    /// Number of `apnsToken()` calls that return nil before the token appears.
+    private let apnsAvailableAfterCalls: Int
+
+    init(
+        apns: String? = "apns-token",
+        fcm: String? = "fcm-token",
+        apnsAvailableAfterCalls: Int = 0
+    ) {
         self.apns = apns
         self.fcm = fcm
+        self.apnsAvailableAfterCalls = apnsAvailableAfterCalls
         var capture: AsyncStream<String>.Continuation!
         self.tokenRefreshes = AsyncStream { capture = $0 }
         self.continuation = capture
@@ -119,12 +127,34 @@ final class FakeTokenProvider: PushTokenProvider, @unchecked Sendable {
         lock.withLock { apns = token }
     }
 
+    /// How many times the APNs token has been asked for. Lets a test pin the poll
+    /// window, which has to match the Flutter SDK's.
+    ///
+    /// Read under the same lock as the value it counts: the poll loop runs on the
+    /// cooperative pool while the test reads from another task, and this type is
+    /// `@unchecked Sendable`, so an unsynchronised read here is a data race the compiler
+    /// will not catch.
+    var apnsCallCount: Int { lock.withLock { calls } }
+    private var calls = 0
+
     func apnsToken() async -> String? {
-        lock.withLock { apns }
+        lock.withLock {
+            calls += 1
+            // Models Apple delivering the token a moment after registration, without a
+            // test needing to race a background task against the poll loop.
+            return calls > apnsAvailableAfterCalls ? apns : nil
+        }
     }
 
+    /// Proves the FCM fetch is skipped when no APNs token arrived.
+    var fcmCallCount: Int { lock.withLock { fcmCalls } }
+    private var fcmCalls = 0
+
     func fcmToken() async -> String? {
-        lock.withLock { fcm }
+        lock.withLock {
+            fcmCalls += 1
+            return fcm
+        }
     }
 
     /// Simulates FCM rotating the token.

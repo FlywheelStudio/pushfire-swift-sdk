@@ -7,6 +7,94 @@ private struct Payload: Encodable {
     let name: String
 }
 
+/// Transport that fails the way `URLSession` does when the device is offline.
+private struct ThrowingTransport: HTTPTransport {
+    let error: any Error
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        throw error
+    }
+}
+
+@Test func networkFailuresCarryTheSystemErrorForBranching() async throws {
+    let client = APIClient(
+        config: PushFireConfiguration(apiKey: "k"),
+        transport: ThrowingTransport(error: URLError(.notConnectedToInternet)),
+        logger: PushFireLogger(enabled: false)
+    )
+
+    do {
+        try await client.send(.registerDevice, body: Payload(name: "Jane"))
+        Issue.record("expected the transport failure to surface")
+    } catch let error as PushFireError {
+        guard case .network(_, let underlying) = error else {
+            Issue.record("expected .network, got \(error)")
+            return
+        }
+        // Without this a caller has to string-match a localized message to tell
+        // "no connection" from "timed out" and decide whether to queue or retry.
+        #expect(underlying?.domain == NSURLErrorDomain)
+        #expect(underlying?.code == NSURLErrorNotConnectedToInternet)
+    }
+}
+
+@Test func timeoutsAreDistinguishableFromBeingOffline() async throws {
+    let client = APIClient(
+        config: PushFireConfiguration(apiKey: "k"),
+        transport: ThrowingTransport(error: URLError(.timedOut)),
+        logger: PushFireLogger(enabled: false)
+    )
+
+    do {
+        try await client.send(.registerDevice, body: Payload(name: "Jane"))
+        Issue.record("expected the transport failure to surface")
+    } catch let error as PushFireError {
+        guard case .network(_, let underlying) = error else {
+            Issue.record("expected .network, got \(error)")
+            return
+        }
+        #expect(underlying?.code == NSURLErrorTimedOut)
+    }
+}
+
+@Test func encodingFailuresCarryTheSystemError() async throws {
+    // Reachable from caller-supplied metadata: JSONEncoder rejects a non-finite double.
+    let transport = FakeTransport(responses: [])
+    let client = makeClient(transport)
+
+    do {
+        try await client.send(
+            .loginSubscriber,
+            body: ["score": JSONValue.double(.nan)]
+        )
+        Issue.record("expected the encode failure to surface")
+    } catch let error as PushFireError {
+        guard case .configuration(let message, let underlying) = error else {
+            Issue.record("expected .configuration, got \(error)")
+            return
+        }
+        #expect(message.contains("Could not encode the request body"))
+        // Dart keeps the original object here; this keeps what can be acted on rather
+        // than flattening the EncodingError into a string.
+        #expect(underlying != nil)
+    }
+
+    // Nothing was sent: the failure happens before the transport is touched.
+    let recorded = await transport.recorded
+    #expect(recorded.isEmpty)
+}
+
+@Test func errorsRenderThroughLocalizedDescription() {
+    // `localizedDescription` is what most Swift code reaches for and what lands in a
+    // crash reporter. Without LocalizedError it renders as
+    // "The operation couldn't be completed. (PushFire.PushFireError error N.)",
+    // discarding every message the SDK builds.
+    let error = PushFireError.device("no token")
+
+    #expect(error.localizedDescription == "PushFire device error: no token")
+    #expect(!error.localizedDescription.contains("couldn't be completed"))
+}
+
 private func makeClient(_ transport: FakeTransport) -> APIClient {
     APIClient(
         config: PushFireConfiguration(apiKey: "test-key"),
@@ -28,7 +116,11 @@ private func makeClient(_ transport: FakeTransport) -> APIClient {
             == "https://api.pushfire.app/functions/v1/register-device"
     )
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-key")
-    #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+    // Charset included: the Dart SDK's http client appends it for a String body, and
+    // both SDKs must put the same bytes on the wire.
+    #expect(
+        request.value(forHTTPHeaderField: "Content-Type") == "application/json; charset=utf-8"
+    )
 
     let data = try await transport.requestData(at: 0)
     #expect(data["name"] as? String == "Jane")
@@ -135,8 +227,10 @@ private func makeClient(_ transport: FakeTransport) -> APIClient {
     } catch PushFireError.api(let message, let code, let statusCode, let responseBody) {
         #expect(message == "Could not decode the response")
         #expect(code == nil)
-        // The request itself succeeded, so there is no failing status to report.
-        #expect(statusCode == nil)
+        // The status the server actually sent. Reporting nil here would make a 200
+        // carrying an HTML gateway page indistinguishable from a 204, and reads as
+        // though no HTTP response arrived at all.
+        #expect(statusCode == 200)
         #expect(responseBody == #"{"id":{"nested":true}}"#)
     }
 }

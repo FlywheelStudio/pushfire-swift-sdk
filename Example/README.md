@@ -1,6 +1,8 @@
 # PushFire example app
 
-A minimal SwiftUI app exercising the SDK.
+A SwiftUI app exercising the whole public surface of the SDK. It doubles as the manual
+test rig for behavior the unit tests cannot reach: a real APNs token, a real permission
+prompt, a real settings round trip.
 
 ## Running it
 

@@ -1,7 +1,7 @@
 import Foundation
 
 /// The outcome of `setNotificationEnabled`.
-public enum SetNotificationResult: Sendable, Equatable {
+public enum SetNotificationResult: Sendable, Hashable {
     /// The preference was updated on the server.
     case success
 
