@@ -303,6 +303,11 @@ await PushFire.shutdown()
 // Whether `configure` has completed.
 let configured = PushFire.isConfigured
 
+// The configuration this instance was built with. Useful for reading back the
+// resolved baseURL or timeout when diagnosing an integration. Printing it redacts
+// the API key; reading `.apiKey` directly does not.
+let baseURL = try PushFire.shared.configuration.baseURL
+
 // This SDK's version, matching the released git tag.
 let version = PushFire.sdkVersion
 ```
