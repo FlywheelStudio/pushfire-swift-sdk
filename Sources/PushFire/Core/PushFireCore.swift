@@ -33,8 +33,12 @@ actor PushFireCore {
         tokens: any PushTokenProvider,
         lifecycle: any AppLifecycleObserver,
         authProvider: (any AuthProvider)?,
-        apnsPollInterval: PollInterval = .milliseconds(500),
-        apnsPollAttempts: Int = 11
+        // Deliberately the same constants `DeviceService` defaults to, not copies of the
+        // numbers. Duplicating the literals here made this the value production actually
+        // used while a test could only pin the other one, so the poll window could drift
+        // back with the suite still green.
+        apnsPollInterval: PollInterval = DeviceService.defaultAPNSPollInterval,
+        apnsPollAttempts: Int = DeviceService.defaultAPNSPollAttempts
     ) {
         let logger = PushFireLogger(enabled: config.enableLogging)
         let apiClient = APIClient(config: config, transport: transport, logger: logger)

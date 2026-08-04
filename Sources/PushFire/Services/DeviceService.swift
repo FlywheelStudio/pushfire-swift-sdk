@@ -33,6 +33,10 @@ actor DeviceService {
     private let logger: PushFireLogger
     private let apnsPollInterval: PollInterval
     private let apnsPollAttempts: Int
+    /// How the poll loop waits between checks. Injectable only so a test can count the
+    /// gaps: the number of sleeps is what makes the window 5.0s rather than 5.5s, and it
+    /// is not observable from the number of token checks.
+    private let sleeper: @Sendable (PollInterval) async -> Void
 
     /// How long a late APNs token has to arrive, matched to the Flutter SDK.
     ///
@@ -58,7 +62,10 @@ actor DeviceService {
         tokens: any PushTokenProvider,
         logger: PushFireLogger,
         apnsPollInterval: PollInterval = DeviceService.defaultAPNSPollInterval,
-        apnsPollAttempts: Int = DeviceService.defaultAPNSPollAttempts
+        apnsPollAttempts: Int = DeviceService.defaultAPNSPollAttempts,
+        sleeper: @escaping @Sendable (PollInterval) async -> Void = {
+            try? await Task.sleep(nanoseconds: $0.nanoseconds)
+        }
     ) {
         self.apiClient = apiClient
         self.config = config
@@ -69,6 +76,7 @@ actor DeviceService {
         self.logger = logger
         self.apnsPollInterval = apnsPollInterval
         self.apnsPollAttempts = apnsPollAttempts
+        self.sleeper = sleeper
     }
 
     /// Registers the device, or updates it if something changed.
@@ -363,8 +371,11 @@ actor DeviceService {
             if let token = await tokens.apnsToken() {
                 return token
             }
+            // No sleep after the last check: N checks must span N-1 gaps, or the window
+            // silently grows past the 5.0s the Flutter SDK allows. The check count alone
+            // does not reveal that, which is why `sleeper` is injectable.
             if attempt < apnsPollAttempts - 1 {
-                try? await Task.sleep(nanoseconds: apnsPollInterval.nanoseconds)
+                await sleeper(apnsPollInterval)
             }
         }
         return nil

@@ -66,6 +66,52 @@ private func makeDevice(id: String = "dev_1", token: String = "fcm-token") -> De
     #expect(Set([a, b]).count == 1)
 }
 
+@Test func everyStoredPropertyParticipatesInEquality() {
+    // The mistake these conformances are exposed to: someone later hand-writes `==` or
+    // `hash(into:)` and forgets a field, silently collapsing distinct values in a Set.
+    // One negative case per field-bearing model is worth more than the positive ones.
+    #expect(Set([makeDevice(), makeDevice(token: "other-token")]).count == 2)
+
+    let base = Subscriber(id: "s1", deviceId: "d1", externalId: "u1", name: "Jane")
+    #expect(Set([base, base.with(name: "Joan")]).count == 2)
+
+    #expect(
+        Set([
+            NotificationStatus(isPermissionGranted: true, isEnabled: true),
+            NotificationStatus(isPermissionGranted: true, isEnabled: false),
+        ]).count == 2
+    )
+}
+
+@Test func naNInMetadataDoesNotBreakSetMembership() {
+    // Synthesised Hashable inherits IEEE semantics, where NaN != NaN, so a subscriber
+    // carrying one could be inserted twice and then never found again — defeating the
+    // whole point of the conformance. NaN is reachable caller input: APIClient
+    // explicitly defends against JSONValue.double(.nan) at encode time.
+    let withNaN = Subscriber(
+        id: "s1", deviceId: "d1", externalId: "u1", metadata: ["score": .double(.nan)])
+    let same = Subscriber(
+        id: "s1", deviceId: "d1", externalId: "u1", metadata: ["score": .double(.nan)])
+
+    #expect(withNaN == same)
+    #expect(Set([withNaN, same]).count == 1)
+    #expect(Set([withNaN]).contains(same))
+}
+
+@Test func negativeZeroHashesAsZero() {
+    // -0.0 == 0.0 is true, so they must hash alike or the Set invariant breaks.
+    #expect(JSONValue.double(-0.0) == JSONValue.double(0.0))
+    #expect(Set([JSONValue.double(-0.0), JSONValue.double(0.0)]).count == 1)
+}
+
+@Test func distinctNumbersStayDistinct() {
+    // The NaN handling must not flatten ordinary values into each other.
+    #expect(JSONValue.double(1.5) != JSONValue.double(2.5))
+    #expect(JSONValue.double(.nan) != JSONValue.double(1.5))
+    #expect(JSONValue.int(1) != JSONValue.double(1.0))
+    #expect(Set([JSONValue.double(.infinity), JSONValue.double(-.infinity)]).count == 2)
+}
+
 @Test func tagsDeduplicateInASet() {
     let tag = SubscriberTag(tagId: "plan", subscriberId: "s1", value: "premium")
     let same = SubscriberTag(tagId: "plan", subscriberId: "s1", value: "premium")

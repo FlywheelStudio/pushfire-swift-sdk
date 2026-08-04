@@ -138,8 +138,13 @@ public final class PushFire: Sendable {
     /// The configuration this instance was built with.
     ///
     /// Useful for reading back the resolved `baseURL` or `timeout` when diagnosing an
-    /// integration. Printing it never reveals the API key — every printing path redacts
-    /// it. The Flutter SDK exposes the same thing as `PushFireSDK.instance.config`.
+    /// integration. The Flutter SDK exposes the same thing as
+    /// `PushFireSDK.instance.config`.
+    ///
+    /// Printing this never reveals the API key — every printing path redacts it. Reading
+    /// `.apiKey` directly does return it in full, so anything linked into the same
+    /// process can read the project key off this. In-process secrets are extractable
+    /// regardless; this is a note about what the redaction does and does not buy.
     public var configuration: PushFireConfiguration { core.config }
 
     // MARK: - Subscribers

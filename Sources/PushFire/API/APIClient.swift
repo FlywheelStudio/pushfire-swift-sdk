@@ -17,14 +17,17 @@ actor APIClient {
         _ endpoint: Endpoint,
         body: Body
     ) async throws -> Response {
-        let data = try await perform(endpoint, body: body)
+        let (data, statusCode) = try await perform(endpoint, body: body)
         do {
             return try JSONDecoder().decode(Response.self, from: data)
         } catch {
             throw PushFireError.api(
                 message: "Could not decode the response",
                 code: nil,
-                statusCode: nil,
+                // The real status, not nil: without it a 200 carrying an HTML gateway
+                // page is indistinguishable from a 204, and a nil status reads as though
+                // no HTTP response happened at all.
+                statusCode: statusCode,
                 responseBody: String(data: data, encoding: .utf8)
             )
         }
@@ -35,7 +38,10 @@ actor APIClient {
         _ = try await perform(endpoint, body: body)
     }
 
-    private func perform<Body: Encodable>(_ endpoint: Endpoint, body: Body) async throws -> Data {
+    private func perform<Body: Encodable>(
+        _ endpoint: Endpoint,
+        body: Body
+    ) async throws -> (data: Data, statusCode: Int) {
         let url = config.baseURL.appendingPathComponent(endpoint.path)
 
         var request = URLRequest(url: url)
@@ -54,7 +60,8 @@ actor APIClient {
             // call is documented to throw `PushFireError`, so that error must not
             // escape here.
             throw PushFireError.configuration(
-                "Could not encode the request body: \(error.localizedDescription)"
+                "Could not encode the request body: \(error.localizedDescription)",
+                underlying: PushFireError.Underlying(error)
             )
         }
 
@@ -70,7 +77,7 @@ actor APIClient {
             logger.error("Network error during \(endpoint.method) \(endpoint.path)", error)
             throw PushFireError.network(
                 error.localizedDescription,
-                underlying: UnderlyingError(error)
+                underlying: PushFireError.Underlying(error)
             )
         }
 
@@ -94,7 +101,7 @@ actor APIClient {
             throw apiError
         }
 
-        return data.isEmpty ? Data("{}".utf8) : data
+        return (data.isEmpty ? Data("{}".utf8) : data, response.statusCode)
     }
 
     /// Wraps a body in the backend's `{"data": ...}` envelope.

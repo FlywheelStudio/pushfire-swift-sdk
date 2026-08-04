@@ -31,7 +31,7 @@ import Testing
         code: NSURLErrorNotConnectedToInternet,
         userInfo: [NSLocalizedDescriptionKey: "The Internet connection appears to be offline."]
     )
-    let error = PushFireError.network("offline", underlying: UnderlyingError(offline))
+    let error = PushFireError.network("offline", underlying: PushFireError.Underlying(offline))
 
     #expect(
         error.description
@@ -43,7 +43,7 @@ import Testing
     // The point of the type: distinguishing offline from timeout without matching on
     // a localized, user-facing string.
     let timeout = URLError(.timedOut)
-    let captured = UnderlyingError(timeout)
+    let captured = PushFireError.Underlying(timeout)
 
     #expect(captured.domain == NSURLErrorDomain)
     #expect(captured.code == NSURLErrorTimedOut)

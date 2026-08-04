@@ -109,6 +109,7 @@ public final class PushFire: Sendable {
     public static var shared: PushFire { get throws }  // throws .notInitialized until configured
     public static var isConfigured: Bool { get }
     public static func shutdown() async
+    public var configuration: PushFireConfiguration { get }  // the config this instance was built with
 }
 
 public struct PushFireConfiguration: Sendable {
@@ -133,12 +134,12 @@ public protocol PushTokenProvider: Sendable {
     var tokenRefreshes: AsyncStream<String> { get }  // emits whenever the FCM token rotates
 }
 
-public enum AuthEvent: Sendable, Equatable {
+public enum AuthEvent: Sendable, Hashable {
     case signedIn(AuthUser)
     case signedOut
 }
 
-public struct AuthUser: Sendable, Equatable {
+public struct AuthUser: Sendable, Hashable {
     public let id: String
     public let name: String?
     public let email: String?
@@ -158,17 +159,27 @@ public struct SupabaseAuthProvider: AuthProvider {
     public var events: AsyncStream<AuthEvent> { get }
 }
 
-public enum PushFireError: Error, Sendable {
+public enum PushFireError: Error, Sendable, LocalizedError {
+    // Nested, not top-level: the module also exports a `PushFire` class, which shadows
+    // the module name, so `PushFire.UnderlyingError` would not have been writable.
+    public struct Underlying: Sendable, Hashable, CustomStringConvertible {
+        public let domain: String  // e.g. NSURLErrorDomain
+        public let code: Int  // e.g. NSURLErrorTimedOut; check domain before branching
+        public let message: String
+        public init(_ error: any Error)
+        public init(domain: String, code: Int, message: String)
+    }
+
     case notInitialized  // `PushFire.shared` accessed before `configure` completed
-    case configuration(String)  // invalid configuration or invalid call arguments
+    case configuration(String, underlying: Underlying? = nil)  // invalid configuration or call arguments; underlying set only for system encode failures
     case device(String)  // device registration or notification-preference failure
     case subscriber(String)  // subscriber login/update/logout failure
     case tag(String)  // tag operation failure
-    case network(String)  // timeout, offline, DNS
+    case network(String, underlying: Underlying? = nil)  // timeout, offline, DNS
     case api(message: String, code: String?, statusCode: Int?, responseBody: String?)  // non-2xx API response
 }
 
-public struct Subscriber: Codable, Sendable, Equatable {
+public struct Subscriber: Codable, Sendable, Hashable {
     public let id: String?
     public let deviceId: String?
     public let externalId: String
@@ -179,14 +190,14 @@ public struct Subscriber: Codable, Sendable, Equatable {
     public func with(name: String? = nil, email: String? = nil, phone: String? = nil, metadata: [String: JSONValue]? = nil) -> Subscriber
 }
 
-public struct SubscriberTag: Codable, Sendable, Equatable {
+public struct SubscriberTag: Codable, Sendable, Hashable {
     public let tagId: String
     public let subscriberId: String
     public let value: String
 }
 
-public struct BulkTagResult: Sendable, Equatable {
-    public struct Failure: Sendable, Equatable {
+public struct BulkTagResult: Sendable, Hashable {
+    public struct Failure: Sendable, Hashable {
         public let tagId: String
         public let message: String
     }
@@ -195,7 +206,7 @@ public struct BulkTagResult: Sendable, Equatable {
     public var isCompleteSuccess: Bool { get }  // true when `failed` is empty
 }
 
-public enum JSONValue: Codable, Sendable, Equatable {
+public enum JSONValue: Codable, Sendable, Hashable {
     case string(String)
     case int(Int)
     case double(Double)
@@ -205,7 +216,7 @@ public enum JSONValue: Codable, Sendable, Equatable {
     case null
 }
 
-public struct Device: Codable, Sendable, Equatable {
+public struct Device: Codable, Sendable, Hashable {
     public let id: String?
     public let fcmToken: String
     public let os: String
@@ -218,28 +229,52 @@ public struct Device: Codable, Sendable, Equatable {
     public func with(id: String? = nil, fcmToken: String? = nil, pushNotificationEnabled: Bool? = nil) -> Device
 }
 
-public struct NotificationStatus: Sendable, Equatable {
+public struct NotificationStatus: Sendable, Hashable {
     public let isPermissionGranted: Bool  // OS-level permission
     public let isEnabled: Bool  // PushFire preference; meaningful only when isPermissionGranted
 }
 
-public enum SetNotificationResult: Sendable, Equatable {
+public enum SetNotificationResult: Sendable, Hashable {
     case success
     case systemPermissionDenied  // OS permission is denied; nothing was changed, no network call made
 }
 
-public enum WorkflowRunTarget: Sendable, Equatable {
+public enum WorkflowRunTarget: Sendable, Hashable {
     case subscribers([String])  // PushFire subscriber ids, must be UUIDs
     case segments([String])  // PushFire segment ids, must be UUIDs
 }
 
-public struct WorkflowExecutionResponse: Codable, Sendable, Equatable {
+public enum WorkflowExecutionType: String, Codable, Sendable {
+    case immediate = "Immediate"
+    case scheduled = "Scheduled"
+}
+
+public enum WorkflowTargetType: String, Codable, Sendable {
+    case subscribers = "Subscribers"
+    case segments = "Segments"
+}
+
+public struct WorkflowTarget: Codable, Sendable, Hashable {
+    public let type: WorkflowTargetType
+    public let values: [String]  // must be valid UUIDs
+    public init(type: WorkflowTargetType, values: [String])
+}
+
+public struct WorkflowExecutionRequest: Encodable, Sendable, Hashable {
+    public let workflowId: String  // must be a valid UUID
+    public let type: WorkflowExecutionType
+    public let scheduledFor: Date?  // serialized as an absolute UTC instant
+    public let target: WorkflowTarget
+    public init(workflowId: String, type: WorkflowExecutionType, scheduledFor: Date? = nil, target: WorkflowTarget)
+}
+
+public struct WorkflowExecutionResponse: Decodable, Sendable, Hashable {
     public let id: String?
     public let message: String?
     public init(id: String?, message: String?)
 }
 
-public enum PushFireEvent: Sendable, Equatable {
+public enum PushFireEvent: Sendable, Hashable {
     case deviceRegistered(Device)
     case subscriberLoggedIn(Subscriber)
     case subscriberLoggedOut
@@ -279,6 +314,9 @@ func removeTag(_ tagId: String) async throws
 ```swift
 @discardableResult func runWorkflow(_ workflowId: String, for target: WorkflowRunTarget, at date: Date? = nil) async throws -> WorkflowExecutionResponse
 // date == nil -> runs immediately; date != nil -> scheduled. workflowId and every target value must be valid UUIDs.
+
+@discardableResult func createWorkflowExecution(_ request: WorkflowExecutionRequest) async throws -> WorkflowExecutionResponse
+// Escape hatch for a request built directly. runWorkflow covers the common cases.
 ```
 
 ### Notifications

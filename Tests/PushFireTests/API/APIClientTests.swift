@@ -54,8 +54,45 @@ private struct ThrowingTransport: HTTPTransport {
             return
         }
         #expect(underlying?.code == NSURLErrorTimedOut)
-        #expect(underlying?.code != NSURLErrorNotConnectedToInternet)
     }
+}
+
+@Test func encodingFailuresCarryTheSystemError() async throws {
+    // Reachable from caller-supplied metadata: JSONEncoder rejects a non-finite double.
+    let transport = FakeTransport(responses: [])
+    let client = makeClient(transport)
+
+    do {
+        try await client.send(
+            .loginSubscriber,
+            body: ["score": JSONValue.double(.nan)]
+        )
+        Issue.record("expected the encode failure to surface")
+    } catch let error as PushFireError {
+        guard case .configuration(let message, let underlying) = error else {
+            Issue.record("expected .configuration, got \(error)")
+            return
+        }
+        #expect(message.contains("Could not encode the request body"))
+        // Dart keeps the original object here; this keeps what can be acted on rather
+        // than flattening the EncodingError into a string.
+        #expect(underlying != nil)
+    }
+
+    // Nothing was sent: the failure happens before the transport is touched.
+    let recorded = await transport.recorded
+    #expect(recorded.isEmpty)
+}
+
+@Test func errorsRenderThroughLocalizedDescription() {
+    // `localizedDescription` is what most Swift code reaches for and what lands in a
+    // crash reporter. Without LocalizedError it renders as
+    // "The operation couldn't be completed. (PushFire.PushFireError error N.)",
+    // discarding every message the SDK builds.
+    let error = PushFireError.device("no token")
+
+    #expect(error.localizedDescription == "PushFire device error: no token")
+    #expect(!error.localizedDescription.contains("couldn't be completed"))
 }
 
 private func makeClient(_ transport: FakeTransport) -> APIClient {
@@ -190,8 +227,10 @@ private func makeClient(_ transport: FakeTransport) -> APIClient {
     } catch PushFireError.api(let message, let code, let statusCode, let responseBody) {
         #expect(message == "Could not decode the response")
         #expect(code == nil)
-        // The request itself succeeded, so there is no failing status to report.
-        #expect(statusCode == nil)
+        // The status the server actually sent. Reporting nil here would make a 200
+        // carrying an HTML gateway page indistinguishable from a 204, and reads as
+        // though no HTTP response arrived at all.
+        #expect(statusCode == 200)
         #expect(responseBody == #"{"id":{"nested":true}}"#)
     }
 }

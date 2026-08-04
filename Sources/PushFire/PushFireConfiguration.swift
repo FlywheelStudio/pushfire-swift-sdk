@@ -5,7 +5,12 @@ public struct PushFireConfiguration: Sendable {
     /// Project API key. Sent as `Authorization: Bearer <apiKey>`.
     public let apiKey: String
 
-    /// Base URL for the PushFire API. The trailing slash is significant.
+    /// Base URL for the PushFire API.
+    ///
+    /// A trailing slash is optional here: paths are joined with
+    /// `appendingPathComponent`, which normalises either form to the same URL. It is
+    /// significant in the Flutter SDK, which concatenates strings — so a base URL copied
+    /// from a working Dart config will also work here, but not the other way round.
     public let baseURL: URL
 
     /// Emit SDK logs through `os.Logger`.

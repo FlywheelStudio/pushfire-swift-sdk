@@ -20,6 +20,11 @@ struct ContentView: View {
     // Workflows
     @State private var workflowId = ""
 
+    // Mirrored into state rather than read in `body`: neither is observable, so a row
+    // reading them directly would only refresh when something else happened to change.
+    @State private var isConfigured = false
+    @State private var baseURL = "unknown"
+
     @State private var log: [String] = []
 
     var body: some View {
@@ -34,26 +39,7 @@ struct ContentView: View {
                 logSection
             }
             .navigationTitle("PushFire")
-            .task {
-                // Configure before observing. `PushFire.shared` throws until configure
-                // completes, so starting the event loop in a separate task would race it
-                // and silently give up.
-                do {
-                    try await PushFire.configure(
-                        PushFireConfiguration(
-                            apiKey: ProcessInfo.processInfo
-                                .environment["PUSHFIRE_API_KEY"] ?? "",
-                            enableLogging: true
-                        )
-                    )
-                } catch {
-                    append("configure failed: \(error)")
-                    return
-                }
-
-                await refresh()
-                await observe()
-            }
+            .task { await configure() }
         }
     }
 
@@ -62,8 +48,12 @@ struct ContentView: View {
     private var sdkSection: some View {
         Section("SDK") {
             LabeledContent("Version", value: PushFire.sdkVersion)
-            LabeledContent("Configured", value: PushFire.isConfigured ? "yes" : "no")
+            LabeledContent("Configured", value: isConfigured ? "yes" : "no")
             LabeledContent("Base URL", value: baseURL)
+            Button("Configure") {
+                Task { await configure() }
+            }
+            .disabled(isConfigured)
             Button("Shut down", role: .destructive) {
                 Task {
                     await PushFire.shutdown()
@@ -71,6 +61,7 @@ struct ContentView: View {
                     await refresh()
                 }
             }
+            .disabled(!isConfigured)
         }
     }
 
@@ -78,7 +69,10 @@ struct ContentView: View {
         Section("Device") {
             LabeledContent("Device id", value: deviceId)
             LabeledContent("Push token", value: maskedToken)
-            LabeledContent("Model", value: device.map { "\($0.model), \($0.os) \($0.osVersion)" } ?? "unknown")
+            LabeledContent(
+                "Model",
+                value: device.map { "\($0.model), \($0.os) \($0.osVersion)" } ?? "unknown"
+            )
             LabeledContent(
                 "OS permission",
                 value: status.map { $0.isPermissionGranted ? "granted" : "denied" } ?? "unknown"
@@ -278,11 +272,6 @@ struct ContentView: View {
 
     // MARK: - Derived values
 
-    private var baseURL: String {
-        guard let sdk = try? PushFire.shared else { return "unknown" }
-        return sdk.configuration.baseURL.absoluteString
-    }
-
     /// Tokens are long and are a send capability; show only enough to match one against
     /// the server.
     private var maskedToken: String {
@@ -300,6 +289,27 @@ struct ContentView: View {
 
     // MARK: - Plumbing
 
+    /// Configures, then observes. Both in one sequential step: `PushFire.shared` throws
+    /// until configure completes, so starting the event loop in a separate task would
+    /// race it and silently give up.
+    private func configure() async {
+        do {
+            try await PushFire.configure(
+                PushFireConfiguration(
+                    apiKey: ProcessInfo.processInfo.environment["PUSHFIRE_API_KEY"] ?? "",
+                    enableLogging: true
+                )
+            )
+        } catch {
+            append("configure failed: \(error)")
+            await refresh()
+            return
+        }
+
+        await refresh()
+        await observe()
+    }
+
     private func observe() async {
         guard let sdk = try? PushFire.shared else { return }
         for await event in await sdk.events {
@@ -309,7 +319,9 @@ struct ContentView: View {
     }
 
     private func refresh() async {
+        isConfigured = PushFire.isConfigured
         guard let sdk = try? PushFire.shared else {
+            baseURL = "unknown"
             deviceId = "not registered"
             device = nil
             status = nil
@@ -318,6 +330,7 @@ struct ContentView: View {
             isLoggedIn = false
             return
         }
+        baseURL = sdk.configuration.baseURL.absoluteString
         deviceId = await sdk.deviceId() ?? "not registered"
         device = await sdk.currentDevice
         status = await sdk.notificationStatus()
